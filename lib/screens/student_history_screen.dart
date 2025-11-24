@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:math'; // Para colores aleatorios
+// Para colores aleatorios
 
 class StudentHistoryScreen extends StatefulWidget {
   const StudentHistoryScreen({super.key});
@@ -21,25 +21,15 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
     Colors.pink.shade700, Colors.green.shade700,
   ];
 
-  // Obtener color basado en el nombre del curso (siempre el mismo para el mismo curso)
+  // Obtener color basado en el nombre del curso
   Color _getColor(String courseName) {
     return _avatarColors[courseName.length % _avatarColors.length];
-  }
-
-  // Obtener iniciales (Ej: "Ingeniería Web" -> "IW")
-  String _getInitials(String courseName) {
-    if (courseName.isEmpty) return "?";
-    List<String> words = courseName.trim().split(' ');
-    if (words.length > 1) {
-      return "${words[0][0]}${words[1][0]}".toUpperCase();
-    }
-    return courseName.substring(0, min(2, courseName.length)).toUpperCase();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50], // Fondo gris muy suave
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text("Mi Historial Académico", style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
@@ -54,7 +44,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
               stream: FirebaseFirestore.instance
                   .collection('asistencias')
                   .where('alumnoId', isEqualTo: user!.uid)
-                  .orderBy('timestamp', descending: true)
+                  // NOTA: Quitamos el orderBy aquí para evitar el error de índice
                   .snapshots(),
               builder: (context, snapshot) {
                 // 1. Carga
@@ -86,7 +76,20 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                   );
                 }
 
-                final docs = snapshot.data!.docs;
+                // 4. ORDENAMIENTO MANUAL (CLIENT-SIDE)
+                // Convertimos a lista y ordenamos por fecha descendente (más reciente primero)
+                List<QueryDocumentSnapshot> docs = snapshot.data!.docs.toList();
+                docs.sort((a, b) {
+                  final Map<String, dynamic> dataA = a.data() as Map<String, dynamic>;
+                  final Map<String, dynamic> dataB = b.data() as Map<String, dynamic>;
+                  
+                  // Obtenemos los timestamps (manejamos nulos por seguridad)
+                  final Timestamp tA = dataA['timestamp'] ?? Timestamp.now();
+                  final Timestamp tB = dataB['timestamp'] ?? Timestamp.now();
+                  
+                  // Orden Descendente: B comparado con A
+                  return tB.compareTo(tA);
+                });
 
                 return ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
@@ -102,7 +105,6 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                     final estado = data['estado'] ?? 'Presente';
                     
                     final color = _getColor(curso);
-                    final initials = _getInitials(curso);
                     final isLastItem = index == docs.length - 1;
 
                     return IntrinsicHeight(
@@ -223,7 +225,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
       bgColor = Colors.orange.shade50;
       textColor = Colors.orange.shade800;
       borderColor = Colors.orange.shade100;
-    } else if (status.toLowerCase().contains("falta")) {
+    } else if (status.toLowerCase().contains("falta") || status.toLowerCase().contains("ausente")) {
       bgColor = Colors.red.shade50;
       textColor = Colors.red.shade800;
       borderColor = Colors.red.shade100;

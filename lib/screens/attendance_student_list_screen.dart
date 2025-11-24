@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class AttendanceStudentListScreen extends StatefulWidget {
-  final Map<String, dynamic> clase; // Datos de la clase (curso, sección, hora)
+  final Map<String, dynamic> clase;
 
   const AttendanceStudentListScreen({super.key, required this.clase});
 
@@ -13,6 +13,7 @@ class AttendanceStudentListScreen extends StatefulWidget {
 class _AttendanceStudentListScreenState extends State<AttendanceStudentListScreen> {
   late Stream<QuerySnapshot> _attendanceStream;
   String _searchQuery = "";
+  bool _isRegistering = false;
 
   @override
   void initState() {
@@ -21,52 +22,37 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
   }
 
   void _setupStream() {
-    // Filtrar por la fecha de HOY y la clase específica
     final todayDate = DateTime.now().toIso8601String().split('T')[0];
 
+    // --- CORRECCIÓN AQUÍ ---
+    // Quitamos el filtro de 'seccion' de la base de datos para evitar el error de índice.
+    // Filtraremos la sección manualmente más abajo.
     _attendanceStream = FirebaseFirestore.instance
         .collection('asistencias')
         .where('curso', isEqualTo: widget.clase['curso'])
-        .where('seccion', isEqualTo: widget.clase['seccion'])
         .where('fecha', isEqualTo: todayDate)
         .snapshots();
   }
 
-  // --- CAMBIAR ESTADO EN FIREBASE ---
-  Future<void> _updateStatus(String docId, String newStatus, {String? motivo}) async {
-    Map<String, dynamic> data = {'estado': newStatus};
-    if (motivo != null) {
-      data['motivo_justificacion'] = motivo;
-    }
-    
-    try {
-      await FirebaseFirestore.instance.collection('asistencias').doc(docId).update(data);
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
-    }
-  }
-
-  // --- DIÁLOGO PARA JUSTIFICAR ---
-  void _showJustifyDialog(String docId, String studentName) {
-    final noteController = TextEditingController();
+  void _showManualRegisterDialog() {
+    final carnetController = TextEditingController();
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Justificar Inasistencia"),
+        title: const Text("Registro Manual"),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("Estudiante: $studentName", style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            const Text("Ingresa el carnet del estudiante:"),
             const SizedBox(height: 10),
             TextField(
-              controller: noteController,
+              controller: carnetController,
               decoration: const InputDecoration(
-                labelText: "Motivo / Comentario",
-                hintText: "Ej: Cita médica, Enfermedad...",
+                labelText: "N° Carnet",
+                hintText: "Ej: 2020-0001i",
                 border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.badge),
               ),
-              maxLines: 2,
             ),
           ],
         ),
@@ -74,9 +60,97 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
           ElevatedButton(
             onPressed: () {
+              if (carnetController.text.isNotEmpty) {
+                Navigator.pop(context);
+                _registerStudentByCarnet(carnetController.text.trim());
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade900, foregroundColor: Colors.white),
+            child: const Text("Registrar"),
+          )
+        ],
+      ),
+    );
+  }
+
+  Future<void> _registerStudentByCarnet(String carnet) async {
+    if (_isRegistering) return;
+    setState(() => _isRegistering = true);
+
+    try {
+      final userQuery = await FirebaseFirestore.instance
+          .collection('users')
+          .where('carnet', isEqualTo: carnet)
+          .limit(1)
+          .get();
+
+      if (userQuery.docs.isEmpty) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Carnet no encontrado"), backgroundColor: Colors.red));
+        setState(() => _isRegistering = false);
+        return;
+      }
+
+      final studentData = userQuery.docs.first.data();
+      final todayDate = DateTime.now().toIso8601String().split('T')[0];
+
+      // Verificar duplicado
+      final existing = await FirebaseFirestore.instance
+          .collection('asistencias')
+          .where('alumnoId', isEqualTo: studentData['uid'])
+          .where('curso', isEqualTo: widget.clase['curso'])
+          .where('fecha', isEqualTo: todayDate)
+          .get();
+
+      if (existing.docs.isNotEmpty) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Ya está en lista"), backgroundColor: Colors.orange));
+        setState(() => _isRegistering = false);
+        return;
+      }
+
+      // Registrar
+      await FirebaseFirestore.instance.collection('asistencias').add({
+        'alumnoId': studentData['uid'],
+        'alumnoNombre': studentData['nombre_completo'],
+        'alumnoCarnet': studentData['carnet'],
+        'alumnoSexo': studentData['sexo'] ?? 'Desconocido',
+        'curso': widget.clase['curso'],
+        'seccion': widget.clase['seccion'], // Guardamos la sección correctamente
+        'aula': widget.clase['aula'],
+        'profesorId': widget.clase['profesorId'] ?? '',
+        'fecha': todayDate,
+        'hora_registro': "Manual",
+        'timestamp': FieldValue.serverTimestamp(),
+        'estado': 'Presente'
+      });
+
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Agregado"), backgroundColor: Colors.green));
+
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _isRegistering = false);
+    }
+  }
+
+  Future<void> _updateStatus(String docId, String newStatus, {String? motivo}) async {
+    Map<String, dynamic> data = {'estado': newStatus};
+    if (motivo != null) data['motivo_justificacion'] = motivo;
+    await FirebaseFirestore.instance.collection('asistencias').doc(docId).update(data);
+  }
+
+  void _showJustifyDialog(String docId, String studentName) {
+    final noteController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Justificar"),
+        content: TextField(controller: noteController, decoration: const InputDecoration(labelText: "Motivo")),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
+          ElevatedButton(
+            onPressed: () {
               _updateStatus(docId, "Justificado", motivo: noteController.text);
-              Navigator.pop(context); // Cerrar diálogo
-              // Si venimos del BottomSheet, cerramos ese también (opcional, depende del flujo UX)
+              Navigator.pop(context);
             },
             child: const Text("Guardar"),
           )
@@ -85,52 +159,18 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
     );
   }
 
-  // --- MENÚ DE OPCIONES (AL TOCAR EL NOMBRE) ---
   void _showStudentOptions(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(data['alumnoNombre'], style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              Text(data['alumnoCarnet'], style: const TextStyle(color: Colors.grey)),
-              const SizedBox(height: 20),
-              const Text("Acciones:", style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 15),
-              ListTile(
-                leading: const Icon(Icons.check_circle, color: Colors.green),
-                title: const Text("Marcar Presente"),
-                onTap: () { _updateStatus(doc.id, "Presente"); Navigator.pop(context); },
-              ),
-              ListTile(
-                leading: const Icon(Icons.access_time_filled, color: Colors.amber),
-                title: const Text("Marcar Tardanza"),
-                onTap: () { _updateStatus(doc.id, "Tardanza"); Navigator.pop(context); },
-              ),
-              ListTile(
-                leading: const Icon(Icons.cancel, color: Colors.red),
-                title: const Text("Marcar Ausente"),
-                onTap: () { _updateStatus(doc.id, "Ausente"); Navigator.pop(context); },
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.medical_services, color: Colors.blue),
-                title: const Text("Justificar / Comentar"),
-                subtitle: Text(data['motivo_justificacion'] ?? "Sin justificación"),
-                onTap: () { 
-                  Navigator.pop(context); 
-                  _showJustifyDialog(doc.id, data['alumnoNombre']); 
-                },
-              ),
-            ],
-          ),
-        );
-      },
+      builder: (context) => Wrap(
+        children: [
+          ListTile(leading: const Icon(Icons.check, color: Colors.green), title: const Text("Presente"), onTap: () { _updateStatus(doc.id, "Presente"); Navigator.pop(context); }),
+          ListTile(leading: const Icon(Icons.access_time, color: Colors.amber), title: const Text("Tardanza"), onTap: () { _updateStatus(doc.id, "Tardanza"); Navigator.pop(context); }),
+          ListTile(leading: const Icon(Icons.close, color: Colors.red), title: const Text("Ausente"), onTap: () { _updateStatus(doc.id, "Ausente"); Navigator.pop(context); }),
+          ListTile(leading: const Icon(Icons.edit_note, color: Colors.blue), title: const Text("Justificar"), onTap: () { Navigator.pop(context); _showJustifyDialog(doc.id, data['alumnoNombre']); }),
+        ],
+      ),
     );
   }
 
@@ -143,115 +183,79 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.clase['curso'], style: const TextStyle(fontSize: 16)),
-            Text("${widget.clase['seccion']} • ${widget.clase['hora']}", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal)),
+            Text("Grupo ${widget.clase['seccion']}", style: const TextStyle(fontSize: 12)),
           ],
         ),
-        backgroundColor: Colors.blue.shade700,
+        backgroundColor: Colors.blue.shade900,
         foregroundColor: Colors.white,
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showManualRegisterDialog,
+        backgroundColor: Colors.blue.shade900,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text("Agregar Alumno"),
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: _attendanceStream,
         builder: (context, snapshot) {
-          if (snapshot.hasError) return const Center(child: Text("Error cargando datos"));
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          final docs = snapshot.data!.docs;
+          // --- FILTRADO EN MEMORIA ---
+          // Aquí filtramos por sección manualmente para no exigir el índice a Firebase
+          final allDocs = snapshot.data!.docs;
+          final docs = allDocs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return data['seccion'] == widget.clase['seccion'];
+          }).toList();
           
-          // CÁLCULO DE ESTADÍSTICAS EN TIEMPO REAL
-          int presentes = docs.where((d) => d['estado'] == 'Presente').length;
-          int ausentes = docs.where((d) => d['estado'] == 'Ausente').length;
-          int tardanzas = docs.where((d) => d['estado'] == 'Tardanza').length;
-          int justificados = docs.where((d) => d['estado'] == 'Justificado').length;
-          
-          // Total de registros (ojo: esto es total de gente que escaneó o fue registrada manual)
-          int totalRegistrados = docs.length;
-
-          // Filtrar por búsqueda
+          // Filtro de búsqueda
           final filteredDocs = docs.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
-            final name = (data['alumnoNombre'] ?? "").toString().toLowerCase();
-            return name.contains(_searchQuery.toLowerCase());
+            return data['alumnoNombre'].toString().toLowerCase().contains(_searchQuery.toLowerCase());
           }).toList();
 
           return Column(
             children: [
-              // 1. HEADER RESUMEN AZUL
+              // Resumen
               Container(
-                color: Colors.blue.shade700,
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                padding: const EdgeInsets.all(16),
+                color: Colors.blue.shade900,
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildStatCard("Presentes", presentes, Colors.blue.shade400),
-                    const SizedBox(width: 8),
-                    _buildStatCard("Ausentes", ausentes, Colors.red.shade400),
-                    const SizedBox(width: 8),
-                    _buildStatCard("Tardanzas", tardanzas, Colors.amber.shade400),
+                    _stat("Total", "${docs.length}", Colors.white),
+                    _stat("Presentes", "${docs.where((d) => d['estado'] == 'Presente').length}", Colors.greenAccent),
+                    _stat("Faltas", "${docs.where((d) => d['estado'] == 'Ausente').length}", Colors.redAccent),
                   ],
                 ),
               ),
-
-              Expanded(
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                  ),
-                  child: Column(
-                    children: [
-                      // 2. ALERTA Y BUSCADOR
-                      Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          children: [
-                            // Alerta de baja asistencia (Lógica simple: si hay más del 30% de ausencias entre los registrados)
-                            if (totalRegistrados > 0 && (ausentes / totalRegistrados) > 0.3)
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                margin: const EdgeInsets.only(bottom: 10),
-                                decoration: BoxDecoration(
-                                  color: Colors.red.shade50,
-                                  border: Border.all(color: Colors.red.shade200),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.warning_amber, color: Colors.red.shade700),
-                                    const SizedBox(width: 10),
-                                    Expanded(child: Text("Alerta: Asistencia irregular hoy", style: TextStyle(color: Colors.red.shade900, fontWeight: FontWeight.bold))),
-                                  ],
-                                ),
-                              ),
-                            
-                            TextField(
-                              onChanged: (val) => setState(() => _searchQuery = val),
-                              decoration: InputDecoration(
-                                hintText: "Buscar estudiante...",
-                                prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                                filled: true,
-                                fillColor: Colors.grey.shade100,
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
-                                contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // 3. LISTA DE ESTUDIANTES
-                      Expanded(
-                        child: filteredDocs.isEmpty
-                          ? const Center(child: Text("Esperando registros..."))
-                          : ListView.builder(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              itemCount: filteredDocs.length,
-                              itemBuilder: (context, index) {
-                                return _buildStudentCard(filteredDocs[index]);
-                              },
-                            ),
-                      ),
-                    ],
+              
+              // Buscador
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: TextField(
+                  onChanged: (v) => setState(() => _searchQuery = v),
+                  decoration: InputDecoration(
+                    hintText: "Buscar alumno...",
+                    prefixIcon: const Icon(Icons.search),
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                    contentPadding: EdgeInsets.zero
                   ),
                 ),
+              ),
+
+              // Lista
+              Expanded(
+                child: filteredDocs.isEmpty
+                  ? const Center(child: Text("No hay alumnos registrados hoy."))
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 80),
+                      itemCount: filteredDocs.length,
+                      itemBuilder: (context, index) => _buildCard(filteredDocs[index]),
+                    ),
               ),
             ],
           );
@@ -260,96 +264,36 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
     );
   }
 
-  Widget _buildStatCard(String label, int count, Color bgColor) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: bgColor.withOpacity(0.2), // Transparencia para efecto visual
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.white24),
-        ),
-        child: Column(
-          children: [
-            Text(count.toString(), style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-            Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-          ],
-        ),
-      ),
+  Widget _stat(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(value, style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.bold)),
+        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+      ],
     );
   }
 
-  Widget _buildStudentCard(DocumentSnapshot doc) {
+  Widget _buildCard(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
-    String status = data['estado'] ?? "Presente";
-    Color statusColor = Colors.green;
-    if (status == 'Ausente') statusColor = Colors.red;
-    if (status == 'Tardanza') statusColor = Colors.amber;
-    if (status == 'Justificado') statusColor = Colors.blue;
+    Color color = Colors.green;
+    if (data['estado'] == 'Ausente') color = Colors.red;
+    if (data['estado'] == 'Tardanza') color = Colors.orange;
+    if (data['estado'] == 'Justificado') color = Colors.blue;
 
-    return InkWell(
-      onTap: () => _showStudentOptions(doc), // Abre el menú al tocar la tarjeta entera
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade200),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 5, offset: const Offset(0, 2))],
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      child: ListTile(
+        onTap: () => _showStudentOptions(doc),
+        leading: CircleAvatar(
+          backgroundColor: color.withOpacity(0.1),
+          child: Icon(Icons.person, color: color),
         ),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(data['alumnoNombre'] ?? "Sin Nombre", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    Text(data['alumnoCarnet'] ?? "---", style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                  ],
-                ),
-                // Badge de estado
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(8)),
-                  child: Text(status, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                )
-              ],
-            ),
-            const SizedBox(height: 10),
-            // Botones de Acción Rápida (Como en tu diseño)
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _updateStatus(doc.id, "Presente"),
-                    icon: const Icon(Icons.check_circle_outline, size: 16),
-                    label: const Text("Presente"),
-                    style: OutlinedButton.styleFrom(foregroundColor: Colors.green, side: const BorderSide(color: Colors.green)),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _updateStatus(doc.id, "Ausente"),
-                    icon: const Icon(Icons.cancel_outlined, size: 16),
-                    label: const Text("Ausente"),
-                    style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
-                  ),
-                ),
-              ],
-            ),
-            if (data.containsKey('hora_registro'))
-              Align(
-                alignment: Alignment.bottomRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 8.0),
-                  child: Text(data['hora_registro'], style: TextStyle(fontSize: 10, color: Colors.grey.shade400)),
-                ),
-              )
-          ],
+        title: Text(data['alumnoNombre'] ?? "Sin Nombre", style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text("${data['alumnoCarnet'] ?? ''} • ${data['hora_registro'] ?? ''}"),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+          child: Text(data['estado'] ?? 'Presente', style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
         ),
       ),
     );
