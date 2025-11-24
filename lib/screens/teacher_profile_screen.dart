@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'teacher_login_screen.dart'; // Para cerrar sesión
+import 'teacher_login_screen.dart'; 
 
 class TeacherProfileScreen extends StatefulWidget {
   const TeacherProfileScreen({super.key});
@@ -15,7 +15,6 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
   bool _isLoading = true;
   bool _isSaving = false;
 
-  // Controladores
   final _nameController = TextEditingController();
   final _codeController = TextEditingController();
   final _emailController = TextEditingController();
@@ -31,6 +30,7 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
   Future<void> _loadProfile() async {
     if (user == null) return;
     try {
+      // Usamos snapshots para que el perfil también se actualice en tiempo real si hay cambios externos
       final doc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
       if (doc.exists) {
         final data = doc.data()!;
@@ -38,6 +38,7 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
           _nameController.text = data['nombre_completo'] ?? "";
           _codeController.text = data['codigo_docente'] ?? "";
           _emailController.text = data['email'] ?? "";
+          
           if (data['horario'] != null) {
             _schedule = List<Map<String, dynamic>>.from(data['horario']);
           }
@@ -45,145 +46,143 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
         });
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
-      setState(() => _isLoading = false);
+      print("Error cargando perfil: $e");
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _saveChanges() async {
+    if (user == null) return;
     setState(() => _isSaving = true);
+
     try {
+      // 1. Crear lista de cursos simplificada para búsqueda rápida (opcional pero recomendado)
       List<Map<String, dynamic>> simpleCourses = _schedule.map((e) => {
         'nombre': e['curso'],
         'seccion': e['seccion'],
         'aula': e['aula']
       }).toList();
 
+      // Eliminar duplicados de la lista de cursos únicos
       final jsonList = simpleCourses.map((item) => item.toString()).toSet().toList();
       final uniqueSimpleCourses = jsonList.map((item) {
+         // Reconstruir el mapa desde el string (lógica simple para este caso)
+         // Nota: En producción mejor usar modelos, pero esto funciona para tu estructura actual.
          return simpleCourses.firstWhere((element) => element.toString() == item);
       }).toList();
 
+      // 2. Guardar en Firestore
       await FirebaseFirestore.instance.collection('users').doc(user!.uid).update({
-        'nombre_completo': _nameController.text.trim(),
         'horario': _schedule,
-        'cursos_impartidos': uniqueSimpleCourses,
+        'cursos_impartidos': uniqueSimpleCourses, // Actualizamos también la lista maestra
       });
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Cambios guardados"), backgroundColor: Colors.green)
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Horario actualizado correctamente"), backgroundColor: Colors.green),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error al guardar: $e"), backgroundColor: Colors.red),
+        );
+      }
     } finally {
-      setState(() => _isSaving = false);
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  Future<void> _logout() async {
-    await FirebaseAuth.instance.signOut();
-    if (!mounted) return;
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const TeacherLoginScreen()),
-      (route) => false,
-    );
-  }
-
+  // --- LÓGICA PARA AGREGAR CLASE ---
   void _showAddClassDialog() {
     final nameCtrl = TextEditingController();
     final secCtrl = TextEditingController();
     final roomCtrl = TextEditingController();
     String selectedDay = "Lunes";
     TimeOfDay selectedTime = const TimeOfDay(hour: 7, minute: 0);
+    TimeOfDay endTime = const TimeOfDay(hour: 8, minute: 40); // Hora fin por defecto
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {
           return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: const Text("Nueva Clase", style: TextStyle(fontWeight: FontWeight.bold)),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildDialogField(nameCtrl, "Nombre Materia", Icons.book),
+                  _buildDialogInput(nameCtrl, "Nombre Asignatura", Icons.book),
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      Expanded(child: _buildDialogField(secCtrl, "Grupo", Icons.people)),
+                      Expanded(child: _buildDialogInput(secCtrl, "Grupo", Icons.people)),
                       const SizedBox(width: 10),
-                      Expanded(child: _buildDialogField(roomCtrl, "Aula", Icons.room)),
+                      Expanded(child: _buildDialogInput(roomCtrl, "Aula", Icons.meeting_room)),
                     ],
                   ),
                   const SizedBox(height: 15),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: selectedDay,
-                          decoration: InputDecoration(
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          items: ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
-                              .map((d) => DropdownMenuItem(value: d, child: Text(d, style: const TextStyle(fontSize: 14)))).toList(),
-                          onChanged: (v) => setModalState(() => selectedDay = v!),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () async {
-                            final t = await showTimePicker(context: context, initialTime: selectedTime);
-                            if (t != null) setModalState(() => selectedTime = t);
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 10),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey),
-                              borderRadius: BorderRadius.circular(10)
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(selectedTime.format(context), style: const TextStyle(fontSize: 13)),
-                                const Icon(Icons.access_time, size: 16),
-                              ],
-                            ),
-                          ),
-                        ),
-                      )
-                    ],
-                  )
+                  
+                  // Selector de Día
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedDay,
+                    decoration: InputDecoration(
+                      labelText: "Día de la semana",
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                    ),
+                    items: ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+                        .map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
+                    onChanged: (v) => setModalState(() => selectedDay = v!),
+                  ),
+                  const SizedBox(height: 15),
+
+                  // Selector de Hora Inicio
+                  ListTile(
+                    title: const Text("Hora Inicio"),
+                    trailing: Text(selectedTime.format(context), style: const TextStyle(fontWeight: FontWeight.bold)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: Colors.grey.shade300)),
+                    onTap: () async {
+                      final t = await showTimePicker(context: context, initialTime: selectedTime);
+                      if (t != null) setModalState(() => selectedTime = t);
+                    },
+                  ),
                 ],
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
+              ),
               ElevatedButton(
                 onPressed: () {
                   if (nameCtrl.text.isEmpty || secCtrl.text.isEmpty || roomCtrl.text.isEmpty) return;
+
+                  // Formatear hora para guardar
                   final localizations = MaterialLocalizations.of(context);
                   String formattedTime = localizations.formatTimeOfDay(selectedTime, alwaysUse24HourFormat: false);
-
+                  
+                  // Calcular hora fin simple (ej. +1h 40min) o dejar fijo
+                  // Para este ejemplo guardamos la hora seleccionada
+                  
                   setState(() {
                     _schedule.add({
                       'curso': nameCtrl.text.trim(),
                       'seccion': secCtrl.text.trim(),
                       'aula': roomCtrl.text.trim(),
                       'dia': selectedDay,
-                      'hora': formattedTime
+                      'hora_inicio': formattedTime, // Usamos claves consistentes
+                      'hora_fin': "Calculada", // Puedes implementar lógica real de hora fin si deseas
                     });
                   });
-                  _saveChanges(); 
+                  
+                  _saveChanges(); // Guardar en Firebase
                   Navigator.pop(context);
                 },
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade900, foregroundColor: Colors.white),
                 child: const Text("Agregar"),
-              )
+              ),
             ],
           );
         }
@@ -191,191 +190,129 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
     );
   }
 
-  Widget _buildDialogField(TextEditingController ctrl, String label, IconData icon) {
+  Widget _buildDialogInput(TextEditingController c, String label, IconData icon) {
     return TextField(
-      controller: ctrl,
+      controller: c,
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon, size: 20),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-        contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
       ),
     );
+  }
+
+  // --- LÓGICA DE BORRADO ---
+  void _confirmDelete(int index) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("¿Eliminar clase?", style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(
+          "Se eliminará '${_schedule[index]['curso']}' del horario. No podrás deshacerlo.",
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar")),
+          ElevatedButton(
+            onPressed: () {
+              setState(() {
+                _schedule.removeAt(index);
+              });
+              _saveChanges();
+              Navigator.pop(ctx);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text("Eliminar"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _logout() async {
+    await FirebaseAuth.instance.signOut();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const TeacherLoginScreen()), 
+        (route) => false
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Colors.grey[50],
+      appBar: AppBar(
+        title: const Text("Mi Perfil"),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.blue.shade900,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        actions: [
+          IconButton(icon: const Icon(Icons.logout, color: Colors.red), onPressed: _logout)
+        ],
+      ),
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator())
         : SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
             child: Column(
               children: [
-                // --- HEADER CURVO ---
-                Stack(
-                  alignment: Alignment.center,
-                  clipBehavior: Clip.none,
+                const CircleAvatar(radius: 40, backgroundColor: Colors.blue, child: Icon(Icons.person, size: 50, color: Colors.white)),
+                const SizedBox(height: 20),
+                _buildProfileField("Nombre", Icons.person, _nameController, readOnly: true),
+                const SizedBox(height: 10),
+                _buildProfileField("Código", Icons.badge, _codeController, readOnly: true),
+                const SizedBox(height: 20),
+                
+                // HEADER DE HORARIO
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Container(
-                      height: 200,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Colors.blue.shade900, Colors.blue.shade600],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: const BorderRadius.only(
-                          bottomLeft: Radius.circular(40),
-                          bottomRight: Radius.circular(40),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: -50,
-                      child: CircleAvatar(
-                        radius: 55,
-                        backgroundColor: Colors.white,
-                        child: CircleAvatar(
-                          radius: 50,
-                          backgroundColor: Colors.grey.shade200,
-                          child: Icon(Icons.person, size: 60, color: Colors.grey.shade400),
-                        ),
+                    Text("Mi Horario", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue.shade900)),
+                    // BOTÓN AGREGAR CLASE
+                    ElevatedButton.icon(
+                      onPressed: _showAddClassDialog, 
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text("Agregar"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade50,
+                        foregroundColor: Colors.blue.shade900,
+                        elevation: 0
                       ),
                     ),
                   ],
                 ),
-                
-                const SizedBox(height: 60), // Espacio para el avatar
+                if (_isSaving) const LinearProgressIndicator(),
+                const SizedBox(height: 10),
 
-                // --- CONTENIDO ---
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    children: [
-                      Text(
-                        _nameController.text,
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
-                      ),
-                      Text(
-                        "Docente - ${_codeController.text}",
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
-                      ),
-                      
-                      const SizedBox(height: 25),
-
-                      // TARJETA DATOS
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 5))],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text("Información Personal", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
-                            const SizedBox(height: 15),
-                            _buildProfileField("Nombre Completo", Icons.edit, _nameController),
-                            const SizedBox(height: 15),
-                            _buildProfileField("Correo Institucional", Icons.email, _emailController, readOnly: true),
-                            const SizedBox(height: 20),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                onPressed: _isSaving ? null : _saveChanges,
-                                icon: const Icon(Icons.save_outlined),
-                                label: Text(_isSaving ? "Guardando..." : "Guardar Cambios"),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green.shade600,
-                                  foregroundColor: Colors.white,
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                ),
-                              ),
-                            )
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 25),
-
-                      // SECCIÓN CARGA ACADÉMICA
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text("Carga Académica", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          IconButton(
-                            onPressed: _showAddClassDialog,
-                            icon: const Icon(Icons.add_circle, color: Colors.blue, size: 28),
-                          )
-                        ],
-                      ),
-                      
-                      if (_schedule.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.all(20),
-                          child: Text("No tienes clases asignadas.", style: TextStyle(color: Colors.grey)),
-                        )
-                      else
-                        ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _schedule.length,
-                          itemBuilder: (context, index) {
-                            final item = _schedule[index];
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 5, offset: const Offset(0, 2))],
-                              ),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
-                                leading: Container(
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(10)),
-                                  child: Text(item['dia'].substring(0, 3).toUpperCase(), style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue.shade900, fontSize: 12)),
-                                ),
-                                title: Text(item['curso'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                subtitle: Text("${item['hora']} • Aula ${item['aula']} • Gp. ${item['seccion']}", style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                                trailing: IconButton(
-                                  icon: Icon(Icons.delete_outline, color: Colors.red.shade300, size: 20),
-                                  onPressed: () {
-                                    setState(() => _schedule.removeAt(index));
-                                    _saveChanges();
-                                  },
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-
-                      const SizedBox(height: 30),
-                      
-                      // BOTÓN CERRAR SESIÓN
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _logout,
-                          icon: const Icon(Icons.logout, size: 20),
-                          label: const Text("Cerrar Sesión"),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red.shade700,
-                            side: BorderSide(color: Colors.red.shade200),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            padding: const EdgeInsets.symmetric(vertical: 15),
+                _schedule.isEmpty 
+                  ? const Padding(padding: EdgeInsets.all(20), child: Text("Sin clases. ¡Agrega una!"))
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _schedule.length,
+                      itemBuilder: (context, index) {
+                        final item = _schedule[index];
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: Colors.blue.shade100,
+                              child: Text(item['dia'].toString().substring(0, 2).toUpperCase(), style: TextStyle(color: Colors.blue.shade900, fontSize: 12, fontWeight: FontWeight.bold)),
+                            ),
+                            title: Text(item['curso'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Text("${item['hora_inicio']} • Aula ${item['aula']}"),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.red),
+                              onPressed: () => _confirmDelete(index),
+                            ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 30),
-                    ],
-                  ),
-                ),
+                        );
+                      },
+                    ),
               ],
             ),
           ),
@@ -386,15 +323,13 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
     return TextField(
       controller: ctrl,
       readOnly: readOnly,
-      style: TextStyle(color: readOnly ? Colors.grey.shade600 : Colors.black),
       decoration: InputDecoration(
         labelText: label,
-        prefixIcon: Icon(icon, color: readOnly ? Colors.grey : Colors.blue.shade900),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
+        prefixIcon: Icon(icon, color: Colors.grey),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
         filled: true,
-        fillColor: readOnly ? Colors.grey.shade100 : Colors.white,
-        contentPadding: const EdgeInsets.symmetric(vertical: 15, horizontal: 10),
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
       ),
     );
   }

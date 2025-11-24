@@ -81,8 +81,9 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
           registrosAlumnos.add(aData); 
 
           String sexo = aData['alumnoSexo'] ?? '';
-          if (sexo == 'Masculino') varones++;
-          else if (sexo == 'Femenino') mujeres++;
+          if (sexo == 'Masculino') {
+            varones++;
+          } else if (sexo == 'Femenino') mujeres++;
         }
 
         combinedList.add({
