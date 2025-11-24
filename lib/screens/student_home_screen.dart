@@ -4,8 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:intl/intl.dart';
-import 'student_risk_screen.dart'; // Asegúrate que existe
-import 'student_history_screen.dart'; // Asegúrate que existe
+import 'student_risk_screen.dart';
+import 'student_history_screen.dart';
 
 class StudentHomeScreen extends StatefulWidget {
   const StudentHomeScreen({super.key});
@@ -16,7 +16,7 @@ class StudentHomeScreen extends StatefulWidget {
 
 class _StudentHomeScreenState extends State<StudentHomeScreen> {
   // --- VARIABLES DE ESTADO ---
-  int _selectedIndex = 0; // Controla la pestaña activa
+  int _selectedIndex = 0;
   
   // Datos del Estudiante
   String _studentName = "Cargando...";
@@ -27,6 +27,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   String _currentCourse = "Esperando escaneo...";
   bool _isScanning = false;
   bool _scanSuccess = false;
+  
+  // --- NUEVA VARIABLE DE BLOQUEO ---
+  // Evita lecturas dobles mientras se procesa la primera
+  bool _isProcessing = false; 
+
   String _scanTime = "";
   String _scanMessage = "";
 
@@ -44,20 +49,27 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
       if (doc.exists) {
         final data = doc.data()!;
-        setState(() {
-          _studentName = data['nombre_completo'] ?? "Estudiante";
-          _studentCode = data['carnet'] ?? "S/N";
-          _studentSex = data['sexo'] ?? "Desconocido";
-        });
+        if (mounted) { // Buena práctica chequear mounted en async
+          setState(() {
+            _studentName = data['nombre_completo'] ?? "Estudiante";
+            _studentCode = data['carnet'] ?? "S/N";
+            _studentSex = data['sexo'] ?? "Desconocido";
+          });
+        }
       }
     } catch (e) {
       print("Error cargando datos: $e");
     }
   }
 
-  // --- LÓGICA QR ---
+  // --- LÓGICA QR CORREGIDA ---
   Future<void> _processQRCode(String qrValue) async {
-    if (_scanSuccess) return;
+    // BLOQUEO: Si ya fue exitoso o se está procesando, no hacer nada.
+    if (_scanSuccess || _isProcessing) return;
+
+    setState(() {
+      _isProcessing = true; // Activamos el bloqueo inmediatamente
+    });
 
     try {
       final Map<String, dynamic> classData = jsonDecode(qrValue);
@@ -70,8 +82,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       final formattedTime = DateFormat('hh:mm a').format(now);
       final todayDate = now.toIso8601String().split('T')[0];
 
-      if (classData['fecha'] != todayDate) throw Exception("Código QR expirado.");
+      // Validación básica de fecha
+      if (classData['fecha'] != todayDate) throw Exception("Código QR expirado o fecha incorrecta.");
 
+      // 1. Verificar si YA existe (Evita duplicados en base de datos)
       final existing = await FirebaseFirestore.instance
           .collection('asistencias')
           .where('alumnoId', isEqualTo: user!.uid)
@@ -80,16 +94,20 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           .get();
 
       if (existing.docs.isNotEmpty) {
-        setState(() {
-          _isScanning = false;
-          _scanSuccess = true;
-          _scanTime = formattedTime;
-          _currentCourse = classData['curso'];
-          _scanMessage = "Ya registraste esta asistencia.";
-        });
+        if (mounted) {
+          setState(() {
+            _isScanning = false;
+            _scanSuccess = true;
+            _scanTime = formattedTime;
+            _currentCourse = classData['curso'];
+            _scanMessage = "Ya registraste esta asistencia.";
+            _isProcessing = false; // Liberamos bloqueo
+          });
+        }
         return;
       }
 
+      // 2. Si no existe, registramos
       await FirebaseFirestore.instance.collection('asistencias').add({
         'alumnoId': user.uid,
         'alumnoNombre': _studentName,
@@ -105,21 +123,34 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         'estado': 'Presente'
       });
 
-      setState(() {
-        _isScanning = false;
-        _scanSuccess = true;
-        _scanTime = formattedTime;
-        _currentCourse = classData['curso'];
-        _scanMessage = "¡Asistencia Confirmada!";
-      });
+      if (mounted) {
+        setState(() {
+          _isScanning = false;
+          _scanSuccess = true;
+          _scanTime = formattedTime;
+          _currentCourse = classData['curso'];
+          _scanMessage = "¡Asistencia Confirmada!";
+          _isProcessing = false; // Liberamos
+        });
+      }
 
     } catch (e) {
-      setState(() => _isScanning = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+      if (mounted) {
+        setState(() {
+          _isScanning = false;
+          _isProcessing = false; // Liberamos en caso de error para permitir reintentar
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red)
+        );
+      }
     }
   }
 
   void _onDetect(BarcodeCapture capture) {
+    // Protección adicional en la detección
+    if (_isProcessing || _scanSuccess) return;
+
     final List<Barcode> barcodes = capture.barcodes;
     if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
       _processQRCode(barcodes.first.rawValue!);
@@ -132,6 +163,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       _isScanning = false;
       _scanMessage = "";
       _currentCourse = "Esperando escaneo...";
+      _isProcessing = false; // Aseguramos que esté desbloqueado
     });
   }
 
@@ -193,7 +225,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // ÁREA CAMBIANTE (Cámara o Botón o Éxito)
+                // ÁREA CAMBIANTE
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 500),
                   transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
@@ -235,9 +267,18 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              MobileScanner(onDetect: _onDetect),
+              MobileScanner(
+                onDetect: _onDetect, // Usamos el método con protección
+              ),
               Container(width: 250, height: 250, decoration: BoxDecoration(border: Border.all(color: Colors.white70, width: 2), borderRadius: BorderRadius.circular(15))),
-              Positioned(bottom: 20, child: ElevatedButton(onPressed: () => setState(() => _isScanning = false), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text("Cancelar")))
+              Positioned(bottom: 20, child: ElevatedButton(onPressed: () => setState(() => _isScanning = false), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text("Cancelar"))),
+              
+              // Indicador de carga si se está procesando el QR
+              if (_isProcessing)
+                Container(
+                  color: Colors.black54,
+                  child: const Center(child: CircularProgressIndicator(color: Colors.white)),
+                )
             ],
           ),
         ),
@@ -267,35 +308,28 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     }
   }
 
-  // --- BUILD PRINCIPAL ---
   @override
   Widget build(BuildContext context) {
-    // Definimos las pantallas aquí
     final List<Widget> screens = [
-      _buildScannerView(),          // 0: Home
-      const StudentRiskScreen(),    // 1: Riesgo
-      const StudentHistoryScreen(), // 2: Historial
+      _buildScannerView(),
+      const StudentRiskScreen(),
+      const StudentHistoryScreen(),
     ];
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      
-      // AQUÍ ESTÁ LA ANIMACIÓN DE TRANSICIÓN
       body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 400), // Duración de la transición
+        duration: const Duration(milliseconds: 400),
         switchInCurve: Curves.easeOut,
         switchOutCurve: Curves.easeIn,
         transitionBuilder: (Widget child, Animation<double> animation) {
-          // Usamos FadeTransition para un efecto suave y profesional
           return FadeTransition(opacity: animation, child: child);
         },
         child: KeyedSubtree(
-          // La Key es vital para que AnimatedSwitcher detecte el cambio
           key: ValueKey<int>(_selectedIndex),
           child: screens[_selectedIndex],
         ),
       ),
-
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]
@@ -309,7 +343,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           onTap: (index) {
             setState(() {
               _selectedIndex = index;
-              // Si salimos del scanner, apagamos la cámara por seguridad
               if (index != 0) _isScanning = false;
             });
           },

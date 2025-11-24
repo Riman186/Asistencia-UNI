@@ -30,69 +30,104 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
     _loadAttendanceHistory();
   }
 
-  // --- 1. CARGAR Y AGRUPAR DATOS ---
+  // --- 1. CARGAR Y AGRUPAR DATOS (CORREGIDO) ---
   Future<void> _loadAttendanceHistory() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     try {
-      // Consultar todas las asistencias del profesor
-      final query = await FirebaseFirestore.instance
-          .collection('asistencias')
+      // PASO A: Obtener las SESIONES creadas.
+      // IMPORTANTE: Quitamos el .orderBy('timestamp') para evitar el error de índice de Firebase.
+      // Ordenaremos los resultados en la memoria del teléfono.
+      final sessionsQuery = await FirebaseFirestore.instance
+          .collection('sesiones')
           .where('profesorId', isEqualTo: user.uid)
-          .orderBy('timestamp', descending: true)
           .get();
 
-      // Agrupar por Sesión Única (Fecha + Curso + Sección)
-      final Map<String, Map<String, dynamic>> grouped = {};
+      // PASO B: Obtener todas las ASISTENCIAS registradas para este profesor
+      final attendanceQuery = await FirebaseFirestore.instance
+          .collection('asistencias')
+          .where('profesorId', isEqualTo: user.uid)
+          .get();
 
-      for (var doc in query.docs) {
-        final data = doc.data();
+      List<Map<String, dynamic>> combinedList = [];
+
+      // PASO C: Cruzar la información
+      for (var sessionDoc in sessionsQuery.docs) {
+        final sData = sessionDoc.data();
         
-        // Clave única para agrupar
-        final String sessionKey = "${data['fecha']}_${data['curso']}_${data['seccion']}";
+        final String sCurso = sData['curso'] ?? 'Sin Nombre';
+        final String sSeccion = sData['seccion'] ?? '';
+        final String sFecha = sData['fecha'] ?? '';
+        // Obtenemos el timestamp para ordenar después, si es nulo usamos 0
+        final dynamic timestampRaw = sData['timestamp']; 
+        final Timestamp timestamp = (timestampRaw is Timestamp) ? timestampRaw : Timestamp.now();
 
-        if (!grouped.containsKey(sessionKey)) {
-          grouped[sessionKey] = {
-            'key': sessionKey,
-            'curso': data['curso'] ?? 'Sin Nombre',
-            'seccion': data['seccion'] ?? '',
-            'aula': data['aula'] ?? '',
-            'fecha': data['fecha'] ?? 'Sin Fecha',
-            'hora_inicio': data['hora_registro'] ?? '',
-            'registros': <Map<String, dynamic>>[],
-            // Contadores para la UI
-            'varones': 0,
-            'mujeres': 0,
-          };
-        }
-        grouped[sessionKey]!['registros'].add(data);
+        // Filtramos las asistencias que pertenecen a ESTA sesión específica
+        final matchingAttendance = attendanceQuery.docs.where((doc) {
+          final aData = doc.data();
+          return aData['curso'] == sCurso && 
+                 aData['seccion'] == sSeccion && 
+                 aData['fecha'] == sFecha;
+        }).toList();
 
-        // Contar Género (Si el campo existe)
-        String sexo = data['alumnoSexo'] ?? '';
-        if (sexo == 'Masculino') {
-          grouped[sessionKey]!['varones']++;
-        } else if (sexo == 'Femenino') {
-          grouped[sessionKey]!['mujeres']++;
+        // Calculamos estadísticas
+        int varones = 0;
+        int mujeres = 0;
+        List<Map<String, dynamic>> registrosAlumnos = [];
+
+        for (var doc in matchingAttendance) {
+          final aData = doc.data();
+          registrosAlumnos.add(aData); 
+
+          String sexo = aData['alumnoSexo'] ?? '';
+          if (sexo == 'Masculino') varones++;
+          else if (sexo == 'Femenino') mujeres++;
         }
+
+        combinedList.add({
+          'curso': sCurso,
+          'seccion': sSeccion,
+          'aula': sData['aula'] ?? 'S/A',
+          'fecha': sFecha,
+          'hora_inicio': sData['hora_inicio'] ?? '', 
+          'registros': registrosAlumnos,
+          'varones': varones,
+          'mujeres': mujeres,
+          'total': registrosAlumnos.length,
+          'sortTime': timestamp, // Campo auxiliar para ordenar
+        });
       }
 
-      List<Map<String, dynamic>> sessionList = grouped.values.toList();
-      
-      // Obtener lista de cursos para el filtro
-      final courseNames = sessionList.map((s) => s['curso'] as String).toSet().toList();
-      courseNames.sort();
-
-      setState(() {
-        _sessions = sessionList;
-        _filteredSessions = sessionList;
-        _uniqueCourses = courseNames;
-        _isLoading = false;
+      // ORDENAR MANUALMENTE (Del más reciente al más antiguo)
+      combinedList.sort((a, b) {
+        Timestamp tA = a['sortTime'];
+        Timestamp tB = b['sortTime'];
+        return tB.compareTo(tA); // Descendente
       });
 
+      // Preparar lista de cursos para el filtro
+      final courseNames = combinedList.map((s) => s['curso'] as String).toSet().toList();
+      courseNames.sort();
+
+      if (mounted) {
+        setState(() {
+          _sessions = combinedList;
+          _filteredSessions = combinedList;
+          _uniqueCourses = courseNames;
+          _isLoading = false;
+        });
+      }
+
     } catch (e) {
+      // Mostramos el error en un SnackBar para saber qué pasa si falla
       print("Error cargando historial: $e");
-      setState(() => _isLoading = false);
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error cargando historial: $e"), backgroundColor: Colors.red)
+        );
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -117,6 +152,13 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
   Future<void> _generateSessionReport(Map<String, dynamic> session) async {
     final List<dynamic> registros = session['registros'];
     
+    if (registros.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("No hay registros para generar reporte"), backgroundColor: Colors.orange)
+      );
+      return;
+    }
+
     final pdf = pw.Document();
     final PdfColor uniBlue = PdfColor.fromInt(0xFF0D47A1);
 
@@ -309,7 +351,7 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                       children: [
                         Icon(Icons.folder_off, size: 60, color: Colors.grey.shade300),
                         const SizedBox(height: 10),
-                        const Text("No hay registros de asistencia.", style: TextStyle(color: Colors.grey)),
+                        const Text("No hay registros de sesiones.", style: TextStyle(color: Colors.grey)),
                       ],
                     ),
                   )
@@ -323,6 +365,9 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                       String fullDate = session['fecha'];
                       String day = fullDate.split('-').last;
                       String month = _getMonthName(fullDate.split('-')[1]);
+
+                      // Lógica para visualización de cantidad 0
+                      bool isEmptySession = session['total'] == 0;
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 15),
@@ -373,14 +418,18 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                                         ),
                                       ),
                                       
-                                      // Icono PDF
+                                      // Icono PDF (Rojo pálido si está vacío, Rojo fuerte si tiene datos)
                                       Container(
                                         padding: const EdgeInsets.all(8),
                                         decoration: BoxDecoration(
-                                          color: Colors.red.shade50,
+                                          color: isEmptySession ? Colors.grey.shade100 : Colors.red.shade50,
                                           shape: BoxShape.circle,
                                         ),
-                                        child: Icon(Icons.picture_as_pdf, size: 20, color: Colors.red.shade400),
+                                        child: Icon(
+                                          Icons.picture_as_pdf, 
+                                          size: 20, 
+                                          color: isEmptySession ? Colors.grey.shade400 : Colors.red.shade400
+                                        ),
                                       )
                                     ],
                                   ),
@@ -396,9 +445,17 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                                         children: [
                                           const Icon(Icons.people_alt, size: 16, color: Colors.grey),
                                           const SizedBox(width: 5),
-                                          Text("${session['registros'].length} Total", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                          Text(
+                                            isEmptySession ? "Sin registros" : "${session['total']} Alumnos", 
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold, 
+                                              fontSize: 12,
+                                              color: isEmptySession ? Colors.red.shade300 : Colors.black87
+                                            )
+                                          ),
                                         ],
                                       ),
+                                      if (!isEmptySession)
                                       Row(
                                         children: [
                                           Icon(Icons.male, size: 16, color: Colors.blue.shade300),
