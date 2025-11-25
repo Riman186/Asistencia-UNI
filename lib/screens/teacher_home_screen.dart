@@ -22,7 +22,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   int _selectedIndex = 0;
   final User? user = FirebaseAuth.instance.currentUser;
   
-  // Variable para saber si el idioma cargó
   bool _localeLoaded = false;
 
   // Colores corporativos
@@ -33,7 +32,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Inicializar formato de fechas en español para evitar el error rojo
     initializeDateFormatting('es_ES', null).then((_) {
       if (mounted) setState(() => _localeLoaded = true);
     });
@@ -101,7 +99,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         final String primerNombre = nombre.split(' ')[0]; 
         final List<dynamic> schedule = userData['horario'] ?? [];
 
-        // Ordenar horario
         final dayOrder = {"Lunes": 1, "Martes": 2, "Miércoles": 3, "Jueves": 4, "Viernes": 5, "Sábado": 6, "Domingo": 7};
         schedule.sort((a, b) {
           int dayA = dayOrder[a['dia']] ?? 8;
@@ -180,13 +177,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     String statusText = "Próximamente";
     Color statusColor = Colors.grey;
 
-    // Lógica de validación de 15 minutos
     if (isToday) {
       try {
         TimeOfDay startTime = _parseTimeOfDay(clase['hora_inicio']);
         DateTime startDateTime = DateTime(now.year, now.month, now.day, startTime.hour, startTime.minute);
         DateTime endWindow = startDateTime.add(const Duration(minutes: 15));
 
+        // Permitimos abrir la clase desde 5 min antes hasta 15 min después
         if (now.isAfter(startDateTime.subtract(const Duration(minutes: 5))) && now.isBefore(endWindow)) {
           isTimeValid = true;
           statusText = "EN CURSO";
@@ -204,7 +201,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       statusColor = Colors.blueGrey;
     }
 
-    bool isEnabled = isToday && isTimeValid;
+    // TODO: Para pruebas, puedes poner isEnabled = true siempre.
+    bool isEnabled = isToday && isTimeValid; 
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -224,7 +222,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           padding: const EdgeInsets.all(20.0),
           child: Row(
             children: [
-              // Columna Hora
               Column(
                 children: [
                   Text(clase['hora_inicio'].toString().split(' ')[0], 
@@ -235,7 +232,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               ),
               Container(height: 40, width: 1, color: Colors.grey[200], margin: const EdgeInsets.symmetric(horizontal: 15)),
               
-              // Detalles
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -262,7 +258,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 ),
               ),
 
-              // Botón de Acción (Usamos InkWell con onTap explícito)
               if (isEnabled)
                 Material(
                   color: _primaryColor,
@@ -287,9 +282,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     );
   }
 
-  // ========================================================================
-  // TAB 1: CONTROL DE ASISTENCIA (SESIONES)
-  // ========================================================================
   Widget _buildSessionsTab() {
     if (user == null) return const Center(child: Text("Error"));
 
@@ -381,9 +373,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     );
   }
 
-  // ========================================================================
-  // LÓGICA Y DIÁLOGOS
-  // ========================================================================
   TimeOfDay _parseTimeOfDay(String t) {
     t = t.trim();
     bool isPm = t.toLowerCase().contains("pm");
@@ -397,33 +386,64 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     return TimeOfDay(hour: h, minute: m);
   }
 
-  void _showQRDialog(Map<String, dynamic> clase) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => QRTimerDialog(
-        claseData: clase,
-        onFinished: () => _saveSession(clase),
-      ),
-    );
-  }
+  // --- GESTIÓN DE SESIONES SEGURA ---
 
-  Future<void> _saveSession(Map<String, dynamic> clase) async {
+  // 1. Crear sesión con estado ABIERTO
+  Future<String> _createSession(Map<String, dynamic> clase) async {
     final now = DateTime.now();
-    final todayStr = now.toIso8601String().split('T')[0];
-    await FirebaseFirestore.instance.collection('sesiones').add({
+    final docRef = await FirebaseFirestore.instance.collection('sesiones').add({
       'profesorId': user!.uid,
       'curso': clase['curso'],
       'seccion': clase['seccion'],
       'aula': clase['aula'],
-      'fecha': todayStr,
+      'fecha': now.toIso8601String().split('T')[0],
       'hora_inicio': DateFormat('hh:mm a').format(now),
       'timestamp': FieldValue.serverTimestamp(),
+      'estado': 'abierto', // <--- Bandera de seguridad
     });
+    return docRef.id;
+  }
+
+  // 2. Cerrar sesión al terminar el timer o cerrar diálogo
+  Future<void> _closeSession(String sessionId) async {
+    await FirebaseFirestore.instance.collection('sesiones').doc(sessionId).update({
+      'estado': 'cerrado',
+    });
+  }
+
+  void _showQRDialog(Map<String, dynamic> clase) async {
+    // Loader mientras se crea la sesión
+    showDialog(
+      context: context, 
+      barrierDismissible: false, 
+      builder: (c) => const Center(child: CircularProgressIndicator())
+    );
+
+    try {
+      // A. Crear la sesión en la BD y obtener el ID
+      String sessionId = await _createSession(clase);
+      
+      if (!mounted) return;
+      Navigator.pop(context); // Cerrar loader
+
+      // B. Mostrar el QR pasándole el sessionId
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => QRTimerDialog(
+          // Inyectamos el ID en los datos para que el QR lo contenga
+          claseData: {...clase, 'sessionId': sessionId},
+          onFinished: () => _closeSession(sessionId),
+        ),
+      );
+    } catch (e) {
+      Navigator.pop(context); // Cerrar loader si falla
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al iniciar sesión: $e")));
+    }
   }
 }
 
-// --- DIÁLOGO QR (VERSIÓN ROBUSTA) ---
+// --- DIÁLOGO QR ---
 class QRTimerDialog extends StatefulWidget {
   final Map<String, dynamic> claseData;
   final VoidCallback onFinished;
@@ -463,7 +483,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
         'seccion': widget.claseData['seccion'] ?? 'A',
         'aula': widget.claseData['aula'] ?? 'S/A',
         'fecha': DateTime.now().toIso8601String().split('T')[0],
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'sessionId': widget.claseData['sessionId'], // <--- Dato clave para la seguridad
       };
       
       setState(() {
@@ -476,7 +496,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
 
   void _finish() {
     _timer.cancel();
-    widget.onFinished();
+    widget.onFinished(); // Llama a _closeSession en el padre
     if (mounted) Navigator.pop(context);
   }
 
@@ -507,7 +527,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
                 const Text("Escanea Ahora", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                 IconButton(
                   icon: const Icon(Icons.close), 
-                  onPressed: () => Navigator.pop(context), 
+                  onPressed: _finish, // Usar _finish para asegurar que se cierre la sesión en BD
                   padding: EdgeInsets.zero, 
                   constraints: const BoxConstraints(),
                 )
@@ -524,7 +544,6 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
             ),
             const SizedBox(height: 25),
             
-            // CONTENEDOR QR ROBUSTO
             Container(
               width: 220,
               height: 220,
@@ -538,7 +557,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
               child: Center(
                 child: QrImageView(
                   data: _qrData,
-                  version: QrVersions.auto, // Corrección: Auto versión
+                  version: QrVersions.auto,
                   size: 200.0,
                   backgroundColor: Colors.white,
                   foregroundColor: const Color(0xFF0D47A1),

@@ -19,10 +19,6 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
   List<Map<String, dynamic>> _courseStats = [];
   List<Map<String, dynamic>> _alerts = [];
 
-  // Meta de clases esperadas por curso (Simulado para el cálculo)
-  // En un sistema real, esto vendría de la configuración del curso del profesor
-  final int _expectedClassesPerCourse = 20; 
-
   @override
   void initState() {
     super.initState();
@@ -34,16 +30,21 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
     if (user == null) return;
 
     try {
-      // 1. Cargar datos del estudiante
+      // 1. Cargar datos del estudiante y su GRUPO
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      String studentGroup = "A"; // Valor por defecto si no existe campo
+      
       if (userDoc.exists) {
+        // Obtenemos el grupo del estudiante para filtrar solo las sesiones que le corresponden
+        studentGroup = userDoc.data()?['grupo'] ?? "A";
+        
         setState(() {
           _studentName = userDoc.data()?['nombre_completo'] ?? "Estudiante";
           _studentCode = userDoc.data()?['carnet'] ?? "S/N";
         });
       }
 
-      // 2. Cargar TODAS las asistencias del estudiante
+      // 2. Cargar asistencias del estudiante
       final querySnapshot = await FirebaseFirestore.instance
           .collection('asistencias')
           .where('alumnoId', isEqualTo: user.uid)
@@ -51,74 +52,91 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
 
       final docs = querySnapshot.docs;
 
-      // 3. Agrupar por curso
+      // 3. Agrupar asistencias por curso
       Map<String, int> attendanceCount = {};
       for (var doc in docs) {
         String curso = doc.data()['curso'] ?? "Desconocido";
         attendanceCount[curso] = (attendanceCount[curso] ?? 0) + 1;
       }
 
-      // 4. Calcular Estadísticas
+      // 4. Calcular estadísticas DINÁMICAS
       List<Map<String, dynamic>> stats = [];
       int totalClassesAttended = 0;
-      int totalExpectedClasses = 0;
+      int totalRealClassesGlobal = 0; // Suma de todas las sesiones reales dictadas
       List<Map<String, dynamic>> newAlerts = [];
 
-      attendanceCount.forEach((curso, count) {
-        // Cálculo: Asistencias / Total Esperado (ej. 20)
-        // Nota: Si el alumno tiene más de 20, limitamos a 100%
-        double percent = (count / _expectedClassesPerCourse).clamp(0.0, 1.0);
+      // Iteramos por cada curso que el alumno ha marcado asistencia alguna vez
+      for (var entry in attendanceCount.entries) {
+        String curso = entry.key;
+        int attended = entry.value;
+
+        // CONSULTA CLAVE: ¿Cuántas sesiones ha creado el profesor para este curso y mi grupo?
+        final sessionsQuery = await FirebaseFirestore.instance
+            .collection('sesiones')
+            .where('curso', isEqualTo: curso)
+            .where('seccion', isEqualTo: studentGroup) // Filtramos por el grupo del estudiante
+            .get();
+
+        int totalReal = sessionsQuery.docs.length;
+
+        // Corrección de seguridad:
+        // 1. Si es la primera clase y totalReal es 0 (por error de sincro), evitamos división por 0.
+        if (totalReal == 0) totalReal = 1; 
+        // 2. Si el alumno tiene más asistencias que clases reales (ej. pruebas), limitamos al 100%.
+        if (attended > totalReal) totalReal = attended;
+
+        double percent = (attended / totalReal).clamp(0.0, 1.0);
         
         stats.add({
           "name": curso,
           "percent": percent,
-          "attended": count,
-          "total": _expectedClassesPerCourse
+          "attended": attended,
+          "total": totalReal // Ahora se muestra el total real de clases dictadas
         });
 
-        totalClassesAttended += count;
-        totalExpectedClasses += _expectedClassesPerCourse;
+        totalClassesAttended += attended;
+        totalRealClassesGlobal += totalReal;
 
-        // Generar Alertas Automáticas
+        // Lógica de Alertas
         if (percent < 0.70) {
           newAlerts.add({
             "course": curso,
-            "msg": "Riesgo alto de reprobación por inasistencia.",
+            "msg": "Riesgo crítico. Asistencia debajo del 70%.",
             "type": "danger",
-            "date": "Hoy" // Fecha simulada de alerta
+            "date": "Hoy"
           });
         } else if (percent < 0.80) {
            newAlerts.add({
             "course": curso,
-            "msg": "Estás cerca del límite de faltas.",
+            "msg": "Atención. Te acercas al límite de faltas.",
             "type": "warning",
             "date": "Hoy"
           });
         }
-      });
+      }
 
-      // Si no hay cursos registrados, evitamos división por cero
-      double globalPercent = totalExpectedClasses == 0 
+      // Cálculo Global
+      double globalPercent = totalRealClassesGlobal == 0 
           ? 1.0 
-          : (totalClassesAttended / totalExpectedClasses).clamp(0.0, 1.0);
+          : (totalClassesAttended / totalRealClassesGlobal).clamp(0.0, 1.0);
       
-      // Determinar Nivel de Riesgo Global
-      String risk = "Bajo"; // Verde
-      if (globalPercent < 0.70) {
-        risk = "Alto";
-      } else if (globalPercent < 0.80) risk = "Advertencia";
+      String risk = "Bajo"; 
+      if (globalPercent < 0.70) risk = "Alto";
+      else if (globalPercent < 0.80) risk = "Advertencia";
 
-      setState(() {
-        _courseStats = stats;
-        _totalAttendancePercentage = globalPercent;
-        _riskLevel = risk;
-        _alerts = newAlerts;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _courseStats = stats;
+          _totalAttendancePercentage = globalPercent;
+          _riskLevel = risk;
+          _alerts = newAlerts;
+          _isLoading = false;
+        });
+      }
 
     } catch (e) {
       print("Error calculando riesgo: $e");
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -147,7 +165,7 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
         ? const Center(child: CircularProgressIndicator())
         : Column(
         children: [
-          // HEADER AZUL
+          // HEADER
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
@@ -170,7 +188,7 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  // 1. INDICADOR DE RIESGO PRINCIPAL
+                  // RIESGO
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(20),
@@ -200,7 +218,7 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
                   
                   const SizedBox(height: 20),
 
-                  // 2. ASISTENCIA TOTAL
+                  // BARRA TOTAL
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -229,11 +247,10 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
                           ),
                         ),
                         const SizedBox(height: 10),
-                        // Texto dinámico según el estado
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text("Semestre 2025-II", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                            const Text("Semestre 2025-I", style: TextStyle(color: Colors.grey, fontSize: 12)),
                             if (_totalAttendancePercentage >= 0.8)
                               Row(children: const [Icon(Icons.trending_up, size: 16, color: Colors.green), SizedBox(width: 4), Text("En buen estado", style: TextStyle(color: Colors.green, fontSize: 12, fontWeight: FontWeight.bold))])
                             else
@@ -246,7 +263,7 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
 
                   const SizedBox(height: 20),
 
-                  // 3. ASISTENCIA POR CURSO (Dinámico)
+                  // LISTA CURSOS
                   if (_courseStats.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.all(20),
@@ -269,7 +286,7 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
                   
                   const SizedBox(height: 20),
 
-                  // 4. ALERTAS (Dinámicas)
+                  // ALERTAS
                   if (_alerts.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.all(20),
@@ -319,7 +336,6 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(course['name'], style: const TextStyle(color: Colors.blueGrey)),
-              // Muestra porcentaje y (Asistidas/Esperadas)
               Text("${(course['percent'] * 100).toInt()}% (${course['attended']}/${course['total']})", 
                 style: TextStyle(color: progressColor, fontWeight: FontWeight.bold, fontSize: 12)),
             ],

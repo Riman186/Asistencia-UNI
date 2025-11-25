@@ -17,21 +17,18 @@ class StudentHomeScreen extends StatefulWidget {
 class _StudentHomeScreenState extends State<StudentHomeScreen> {
   int _selectedIndex = 0;
   
-  // Datos del estudiante
   String _studentName = "Cargando...";
   String _studentCode = "...";
   String _studentSex = "Desconocido";
 
-  // Controlador de cámara para poder PAUSARLA
   final MobileScannerController _cameraController = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates, // Configuración extra de seguridad
+    detectionSpeed: DetectionSpeed.noDuplicates,
   );
 
-  // Variables de estado del escáner
   String _currentCourse = "Esperando escaneo...";
-  bool _isScanning = false; // Controla si se muestra la vista de cámara
-  bool _scanSuccess = false; // Controla si se muestra la vista de éxito
-  bool _isProcessing = false; // SEMÁFORO: Bloquea múltiples lecturas lógicas
+  bool _isScanning = false;
+  bool _scanSuccess = false;
+  bool _isProcessing = false; 
 
   String _scanTime = "";
   String _scanMessage = "";
@@ -61,21 +58,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     }
   }
 
-  // --- LÓGICA DE DETECCIÓN SEGURA ---
   void _onDetect(BarcodeCapture capture) async {
-    // 1. SEMÁFORO: Si ya estamos procesando, ignorar cualquier evento nuevo
     if (_isProcessing || _scanSuccess) return;
 
     final List<Barcode> barcodes = capture.barcodes;
     if (barcodes.isEmpty || barcodes.first.rawValue == null) return;
 
-    // 2. ACTIVAR BLOQUEO
     _isProcessing = true;
-
-    // 3. DETENER CÁMARA FÍSICAMENTE (La clave para evitar duplicados)
     await _cameraController.stop();
-
-    // 4. Procesar el código
     _processQRCode(barcodes.first.rawValue!);
   }
 
@@ -83,33 +73,55 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     try {
       final Map<String, dynamic> classData = jsonDecode(qrValue);
       
-      // Validaciones de seguridad
+      // 1. Validaciones básicas
       if (!classData.containsKey('curso') || !classData.containsKey('fecha')) {
         throw Exception("QR no válido");
+      }
+
+      // 2. VALIDACIÓN DE SEGURIDAD: Session ID
+      if (!classData.containsKey('sessionId')) {
+        throw Exception("Este código QR es de una versión antigua o no es válido.");
+      }
+
+      String sessionId = classData['sessionId'];
+
+      // 3. Consultar estado en tiempo real
+      final sessionDoc = await FirebaseFirestore.instance
+          .collection('sesiones')
+          .doc(sessionId)
+          .get();
+
+      if (!sessionDoc.exists) {
+        throw Exception("La sesión de clase no existe.");
+      }
+
+      // 4. Verificar si está cerrada
+      if (sessionDoc.data()?['estado'] != 'abierto') {
+        _showResult(classData['curso'], "La clase ha finalizado. Ya no se permite registrar asistencia.", isError: true);
+        return;
       }
 
       final user = FirebaseAuth.instance.currentUser;
       final now = DateTime.now();
       final todayDate = now.toIso8601String().split('T')[0];
 
-      // Validar que el QR sea de hoy (evitar trampas con fotos viejas)
+      // 5. Validar fecha (doble seguridad)
       if (classData['fecha'] != todayDate) {
         throw Exception("Este código QR ha expirado o es de otra fecha.");
       }
 
-      // Verificar duplicado en base de datos (Doble Check)
+      // 6. Verificar duplicado
       final existing = await FirebaseFirestore.instance.collection('asistencias')
           .where('alumnoId', isEqualTo: user!.uid)
-          .where('curso', isEqualTo: classData['curso'])
-          .where('fecha', isEqualTo: todayDate)
+          .where('sessionId', isEqualTo: sessionId) // Verificamos por ID de sesión directamente
           .get();
 
       if (existing.docs.isNotEmpty) {
-        _showResult(classData['curso'], "Ya registraste asistencia hoy.", isError: false);
+        _showResult(classData['curso'], "Ya registraste asistencia en esta sesión.", isError: false);
         return;
       }
 
-      // Registrar Asistencia
+      // 7. Registrar Asistencia
       await FirebaseFirestore.instance.collection('asistencias').add({
         'alumnoId': user.uid,
         'alumnoNombre': _studentName,
@@ -119,6 +131,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         'seccion': classData['seccion'],
         'aula': classData['aula'],
         'profesorId': classData['profesorId'],
+        'sessionId': sessionId, // Guardamos el ID de sesión para referencias futuras
         'fecha': todayDate,
         'hora_registro': DateFormat('hh:mm a').format(now),
         'timestamp': FieldValue.serverTimestamp(),
@@ -128,11 +141,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       _showResult(classData['curso'], "¡Asistencia Exitosa!", isError: false);
 
     } catch (e) {
-      // Si hay error, permitimos reintentar
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
-        
-        // Reiniciamos cámara y semáforo para intentar de nuevo
         _isProcessing = false; 
         _cameraController.start();
       }
@@ -142,17 +152,15 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   void _showResult(String curso, String mensaje, {required bool isError}) {
     if (!mounted) return;
     setState(() {
-      _isScanning = false; // Ocultar cámara
-      _scanSuccess = true; // Mostrar pantalla de éxito
+      _isScanning = false;
+      _scanSuccess = true;
       _currentCourse = curso;
       _scanMessage = mensaje;
       _scanTime = DateFormat('hh:mm a').format(DateTime.now());
-      // No liberamos _isProcessing aquí, para obligar a usar el botón "Volver"
     });
   }
 
   void _resetScanner() {
-    // Reiniciar todo para un nuevo escaneo
     setState(() {
       _scanSuccess = false;
       _isScanning = false;
@@ -160,16 +168,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       _scanMessage = "";
       _currentCourse = "Esperando...";
     });
-    // Nota: No iniciamos la cámara aquí, se inicia al pulsar el botón "ABRIR CÁMARA"
   }
 
-  // --- UI PRINCIPAL ---
   @override
   Widget build(BuildContext context) {
     final List<Widget> screens = [
-      _buildScannerInterface(), // Pantalla 0: Escáner
-      const StudentRiskScreen(), // Pantalla 1: Riesgo
-      const StudentHistoryScreen(), // Pantalla 2: Historial
+      _buildScannerInterface(),
+      const StudentRiskScreen(),
+      const StudentHistoryScreen(),
     ];
 
     return Scaffold(
@@ -181,7 +187,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         onTap: (index) {
           setState(() {
             _selectedIndex = index;
-            // Si salimos de la pestaña de escáner, aseguramos detener la cámara
             if (index != 0) _cameraController.stop();
           });
         },
@@ -197,7 +202,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   Widget _buildScannerInterface() {
     return Column(
       children: [
-        // Header Azul
         Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(20, 60, 20, 30),
@@ -216,7 +220,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           ),
         ),
         
-        // Cuerpo cambiante
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(20),
@@ -251,7 +254,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             ),
             onPressed: () {
               setState(() => _isScanning = true);
-              _cameraController.start(); // Iniciamos cámara explícitamente aquí
+              _cameraController.start();
             },
           )
         ],
@@ -272,7 +275,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   controller: _cameraController,
                   onDetect: _onDetect,
                 ),
-                // Marco de enfoque
                 Container(
                   width: 250, height: 250,
                   decoration: BoxDecoration(
@@ -280,7 +282,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     borderRadius: BorderRadius.circular(10)
                   ),
                 ),
-                // Loading Overlay si está procesando
                 if (_isProcessing)
                   Container(
                     color: Colors.black54,
@@ -307,6 +308,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   Widget _buildSuccessView() {
+    Color color = _scanMessage.contains("finalizada") ? Colors.red : Colors.green;
+    IconData icon = _scanMessage.contains("finalizada") ? Icons.cancel : Icons.check_circle;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(30),
@@ -314,9 +318,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.check_circle, color: Colors.green, size: 80),
+          Icon(icon, color: color, size: 80),
           const SizedBox(height: 20),
-          Text(_scanMessage, textAlign: TextAlign.center, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.green)),
+          Text(_scanMessage, textAlign: TextAlign.center, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: color)),
           const SizedBox(height: 20),
           const Divider(),
           const SizedBox(height: 10),
