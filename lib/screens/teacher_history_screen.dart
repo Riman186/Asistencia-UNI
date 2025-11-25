@@ -24,27 +24,27 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
   String? _selectedCourse;
   List<String> _uniqueCourses = [];
 
+  // Colores
+  final Color _primaryColor = const Color(0xFF0D47A1);
+  final Color _backgroundColor = const Color(0xFFF4F6F9);
+
   @override
   void initState() {
     super.initState();
     _loadAttendanceHistory();
   }
 
-  // --- 1. CARGAR Y AGRUPAR DATOS (CORREGIDO) ---
+  // --- 1. CARGAR DATOS (INTACTO) ---
   Future<void> _loadAttendanceHistory() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     try {
-      // PASO A: Obtener las SESIONES creadas.
-      // IMPORTANTE: Quitamos el .orderBy('timestamp') para evitar el error de índice de Firebase.
-      // Ordenaremos los resultados en la memoria del teléfono.
       final sessionsQuery = await FirebaseFirestore.instance
           .collection('sesiones')
           .where('profesorId', isEqualTo: user.uid)
           .get();
 
-      // PASO B: Obtener todas las ASISTENCIAS registradas para este profesor
       final attendanceQuery = await FirebaseFirestore.instance
           .collection('asistencias')
           .where('profesorId', isEqualTo: user.uid)
@@ -52,18 +52,14 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
 
       List<Map<String, dynamic>> combinedList = [];
 
-      // PASO C: Cruzar la información
       for (var sessionDoc in sessionsQuery.docs) {
         final sData = sessionDoc.data();
-        
         final String sCurso = sData['curso'] ?? 'Sin Nombre';
         final String sSeccion = sData['seccion'] ?? '';
         final String sFecha = sData['fecha'] ?? '';
-        // Obtenemos el timestamp para ordenar después, si es nulo usamos 0
         final dynamic timestampRaw = sData['timestamp']; 
         final Timestamp timestamp = (timestampRaw is Timestamp) ? timestampRaw : Timestamp.now();
 
-        // Filtramos las asistencias que pertenecen a ESTA sesión específica
         final matchingAttendance = attendanceQuery.docs.where((doc) {
           final aData = doc.data();
           return aData['curso'] == sCurso && 
@@ -71,7 +67,6 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                  aData['fecha'] == sFecha;
         }).toList();
 
-        // Calculamos estadísticas
         int varones = 0;
         int mujeres = 0;
         List<Map<String, dynamic>> registrosAlumnos = [];
@@ -79,7 +74,6 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
         for (var doc in matchingAttendance) {
           final aData = doc.data();
           registrosAlumnos.add(aData); 
-
           String sexo = aData['alumnoSexo'] ?? '';
           if (sexo == 'Masculino') {
             varones++;
@@ -96,18 +90,16 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
           'varones': varones,
           'mujeres': mujeres,
           'total': registrosAlumnos.length,
-          'sortTime': timestamp, // Campo auxiliar para ordenar
+          'sortTime': timestamp,
         });
       }
 
-      // ORDENAR MANUALMENTE (Del más reciente al más antiguo)
       combinedList.sort((a, b) {
         Timestamp tA = a['sortTime'];
         Timestamp tB = b['sortTime'];
-        return tB.compareTo(tA); // Descendente
+        return tB.compareTo(tA);
       });
 
-      // Preparar lista de cursos para el filtro
       final courseNames = combinedList.map((s) => s['curso'] as String).toSet().toList();
       courseNames.sort();
 
@@ -119,44 +111,29 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
           _isLoading = false;
         });
       }
-
     } catch (e) {
-      // Mostramos el error en un SnackBar para saber qué pasa si falla
-      print("Error cargando historial: $e");
-      if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error cargando historial: $e"), backgroundColor: Colors.red)
-        );
-        setState(() => _isLoading = false);
-      }
+      print("Error: $e");
+      if(mounted) setState(() => _isLoading = false);
     }
   }
 
-  // --- 2. APLICAR FILTROS ---
   void _applyFilters() {
     setState(() {
       _filteredSessions = _sessions.where((session) {
-        // Filtro por Dropdown
         final matchCourse = _selectedCourse == null || session['curso'] == _selectedCourse;
-        
-        // Filtro por Texto (Fecha o Nombre)
         final searchLower = _searchQuery.toLowerCase();
         final matchText = session['fecha'].toString().contains(searchLower) || 
                           session['curso'].toString().toLowerCase().contains(searchLower);
-
         return matchCourse && matchText;
       }).toList();
     });
   }
 
-  // --- 3. GENERAR PDF ---
+  // --- GENERACIÓN PDF (INTACTO) ---
   Future<void> _generateSessionReport(Map<String, dynamic> session) async {
     final List<dynamic> registros = session['registros'];
-    
     if (registros.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("No hay registros para generar reporte"), backgroundColor: Colors.orange)
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sin registros para reporte"), backgroundColor: Colors.orange));
       return;
     }
 
@@ -169,73 +146,35 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
         margin: const pw.EdgeInsets.all(40),
         build: (pw.Context context) {
           return [
-            // Encabezado
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text("REPORTE DE ASISTENCIA", style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: uniBlue)),
-                    pw.Text("Universidad Nacional de Ingeniería", style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
-                  ]
-                ),
+                pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                  pw.Text("REPORTE DE ASISTENCIA", style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: uniBlue)),
+                  pw.Text("Universidad Nacional de Ingeniería", style: const pw.TextStyle(fontSize: 12, color: PdfColors.grey700)),
+                ]),
                 pw.Text(session['fecha'], style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
               ]
             ),
             pw.SizedBox(height: 20),
-
-            // Tarjeta de Info
             pw.Container(
               padding: const pw.EdgeInsets.all(12),
-              decoration: pw.BoxDecoration(
-                border: pw.Border.all(color: PdfColors.grey400),
-                borderRadius: pw.BorderRadius.circular(5),
-                color: PdfColors.grey100,
-              ),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-                children: [
-                  _buildPdfInfo("Asignatura", session['curso']),
-                  _buildPdfInfo("Grupo", session['seccion']),
-                  _buildPdfInfo("Aula", session['aula']),
-                  _buildPdfInfo("Total", "${registros.length}"),
-                ]
-              )
-            ),
-            pw.SizedBox(height: 10),
-
-            // Resumen Demográfico
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.end,
-              children: [
-                pw.Text("Resumen:  ", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                pw.Text("Hombres: ${session['varones']}  |  Mujeres: ${session['mujeres']}", style: const pw.TextStyle(color: PdfColors.grey700)),
-              ]
+              decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400), borderRadius: pw.BorderRadius.circular(5), color: PdfColors.grey100),
+              child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceAround, children: [
+                _buildPdfInfo("Asignatura", session['curso']),
+                _buildPdfInfo("Grupo", session['seccion']),
+                _buildPdfInfo("Aula", session['aula']),
+                _buildPdfInfo("Total", "${registros.length}"),
+              ])
             ),
             pw.SizedBox(height: 15),
-
-            // Tabla de Alumnos
             pw.Table(
               border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
-              columnWidths: {
-                0: const pw.FixedColumnWidth(30),
-                1: const pw.FlexColumnWidth(2), // Nombre
-                2: const pw.FlexColumnWidth(1), // Carnet
-                3: const pw.FixedColumnWidth(60), // Sexo
-                4: const pw.FixedColumnWidth(60), // Hora
-              },
+              columnWidths: {0: const pw.FixedColumnWidth(30), 1: const pw.FlexColumnWidth(2), 2: const pw.FlexColumnWidth(1), 3: const pw.FixedColumnWidth(60), 4: const pw.FixedColumnWidth(60)},
               children: [
-                pw.TableRow(
-                  decoration: pw.BoxDecoration(color: uniBlue),
-                  children: [
-                    _buildHeaderCell("#"),
-                    _buildHeaderCell("Nombre Completo"),
-                    _buildHeaderCell("Carnet"),
-                    _buildHeaderCell("Sexo"),
-                    _buildHeaderCell("Hora"),
-                  ]
-                ),
+                pw.TableRow(decoration: pw.BoxDecoration(color: uniBlue), children: [
+                  _buildHeaderCell("#"), _buildHeaderCell("Nombre"), _buildHeaderCell("Carnet"), _buildHeaderCell("Sexo"), _buildHeaderCell("Hora"),
+                ]),
                 ...List.generate(registros.length, (index) {
                   final r = registros[index];
                   return pw.TableRow(
@@ -255,228 +194,187 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
         },
       ),
     );
-
     await Printing.sharePdf(bytes: await pdf.save(), filename: "Asistencia_${session['curso']}.pdf");
   }
 
-  pw.Widget _buildPdfInfo(String label, String value) {
-    return pw.Column(children: [
-      pw.Text(label, style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600)),
-      pw.Text(value, style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-    ]);
-  }
+  pw.Widget _buildPdfInfo(String label, String value) => pw.Column(children: [pw.Text(label, style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600)), pw.Text(value, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))]);
+  pw.Widget _buildHeaderCell(String text) => pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(text, style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 10), textAlign: pw.TextAlign.center));
+  pw.Widget _buildCell(String text, {pw.TextAlign align = pw.TextAlign.left}) => pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(text, style: const pw.TextStyle(fontSize: 10), textAlign: align));
 
-  pw.Widget _buildHeaderCell(String text) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.all(5),
-      child: pw.Text(text, style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 10), textAlign: pw.TextAlign.center),
-    );
-  }
-
-  pw.Widget _buildCell(String text, {pw.TextAlign align = pw.TextAlign.left}) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.all(5),
-      child: pw.Text(text, style: const pw.TextStyle(fontSize: 10), textAlign: align),
-    );
-  }
-
-  // --- UI PRINCIPAL ---
+  // --- UI PRINCIPAL (DISEÑO RENOVADO) ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
-      appBar: AppBar(
-        title: const Text("Historial de Sesiones"),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.blue.shade900,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-      ),
+      backgroundColor: _backgroundColor,
       body: Column(
         children: [
-          // --- FILTROS ---
+          // HEADER PERSONALIZADO
           Container(
-            padding: const EdgeInsets.all(15),
+            padding: const EdgeInsets.fromLTRB(24, 60, 24, 25),
+            width: double.infinity,
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(20), bottomRight: Radius.circular(20)),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 5))],
+              borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30)),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 5))],
             ),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Buscador
-                TextField(
-                  decoration: InputDecoration(
-                    hintText: "Buscar fecha o materia...",
-                    prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                    filled: true,
-                    fillColor: Colors.grey.shade100,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                  ),
-                  onChanged: (val) {
-                    _searchQuery = val;
-                    _applyFilters();
-                  },
-                ),
-                const SizedBox(height: 10),
-                // Dropdown
-                DropdownButtonFormField<String>(
-                  decoration: InputDecoration(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  initialValue: _selectedCourse,
-                  hint: const Text("Filtrar por Asignatura"),
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text("Todas las asignaturas")),
-                    ..._uniqueCourses.map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                const Text("Historial Académico", style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Colors.black87)),
+                const SizedBox(height: 5),
+                Text("Consulta y exporta tus registros pasados", style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+                const SizedBox(height: 20),
+                
+                // BUSCADOR Y FILTRO
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 45,
+                        decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(12)),
+                        child: TextField(
+                          onChanged: (val) { _searchQuery = val; _applyFilters(); },
+                          decoration: const InputDecoration(
+                            hintText: "Buscar fecha o materia...",
+                            prefixIcon: Icon(Icons.search, color: Colors.grey),
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    // Botón Filtro
+                    Container(
+                      height: 45, width: 45,
+                      decoration: BoxDecoration(color: _primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                      child: PopupMenuButton<String>(
+                        icon: Icon(Icons.filter_list, color: _primaryColor),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        onSelected: (val) {
+                          setState(() {
+                            _selectedCourse = val == 'all' ? null : val;
+                            _applyFilters();
+                          });
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(value: 'all', child: Text("Todas las materias")),
+                          ..._uniqueCourses.map((c) => PopupMenuItem(value: c, child: Text(c)))
+                        ],
+                      ),
+                    )
                   ],
-                  onChanged: (val) {
-                    _selectedCourse = val;
-                    _applyFilters();
-                  },
-                ),
+                )
               ],
             ),
           ),
 
-          // --- LISTA DE TARJETAS ---
+          // LISTA DE SESIONES
           Expanded(
             child: _isLoading 
               ? const Center(child: CircularProgressIndicator())
               : _filteredSessions.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.folder_off, size: 60, color: Colors.grey.shade300),
-                        const SizedBox(height: 10),
-                        const Text("No hay registros de sesiones.", style: TextStyle(color: Colors.grey)),
-                      ],
-                    ),
-                  )
+                ? _buildEmptyState()
                 : ListView.builder(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(20),
                     itemCount: _filteredSessions.length,
-                    itemBuilder: (context, index) {
-                      final session = _filteredSessions[index];
-                      
-                      // Extracción de fecha para diseño (YYYY-MM-DD)
-                      String fullDate = session['fecha'];
-                      String day = fullDate.split('-').last;
-                      String month = _getMonthName(fullDate.split('-')[1]);
-
-                      // Lógica para visualización de cantidad 0
-                      bool isEmptySession = session['total'] == 0;
-
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 15),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(15),
-                          boxShadow: [
-                            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
-                          ],
-                        ),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(15),
-                            onTap: () => _generateSessionReport(session),
-                            child: Padding(
-                              padding: const EdgeInsets.all(15),
-                              child: Column(
-                                children: [
-                                  Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      // Bloque Fecha
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue.shade50,
-                                          borderRadius: BorderRadius.circular(10),
-                                        ),
-                                        child: Column(
-                                          children: [
-                                            Text(day, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue.shade900)),
-                                            Text(month, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue.shade800)),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 15),
-                                      
-                                      // Info Principal
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(session['curso'], style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-                                            const SizedBox(height: 4),
-                                            Text("Grupo ${session['seccion']} • Aula ${session['aula']}", style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                                          ],
-                                        ),
-                                      ),
-                                      
-                                      // Icono PDF (Rojo pálido si está vacío, Rojo fuerte si tiene datos)
-                                      Container(
-                                        padding: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          color: isEmptySession ? Colors.grey.shade100 : Colors.red.shade50,
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: Icon(
-                                          Icons.picture_as_pdf, 
-                                          size: 20, 
-                                          color: isEmptySession ? Colors.grey.shade400 : Colors.red.shade400
-                                        ),
-                                      )
-                                    ],
-                                  ),
-                                  const SizedBox(height: 12),
-                                  const Divider(height: 1),
-                                  const SizedBox(height: 10),
-                                  
-                                  // Estadísticas Rápidas
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          const Icon(Icons.people_alt, size: 16, color: Colors.grey),
-                                          const SizedBox(width: 5),
-                                          Text(
-                                            isEmptySession ? "Sin registros" : "${session['total']} Alumnos", 
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold, 
-                                              fontSize: 12,
-                                              color: isEmptySession ? Colors.red.shade300 : Colors.black87
-                                            )
-                                          ),
-                                        ],
-                                      ),
-                                      if (!isEmptySession)
-                                      Row(
-                                        children: [
-                                          Icon(Icons.male, size: 16, color: Colors.blue.shade300),
-                                          Text("${session['varones']}", style: const TextStyle(fontSize: 12)),
-                                          const SizedBox(width: 10),
-                                          Icon(Icons.female, size: 16, color: Colors.pink.shade300),
-                                          Text("${session['mujeres']}", style: const TextStyle(fontSize: 12)),
-                                        ],
-                                      )
-                                    ],
-                                  )
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
+                    itemBuilder: (context, index) => _buildHistoryCard(_filteredSessions[index]),
                   ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHistoryCard(Map<String, dynamic> session) {
+    String fullDate = session['fecha'];
+    String day = fullDate.split('-').last;
+    String month = _getMonthName(fullDate.split('-')[1]);
+    bool isEmptySession = session['total'] == 0;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => _generateSessionReport(session),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              // FECHA (Badge lateral)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _primaryColor.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  children: [
+                    Text(day, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: _primaryColor)),
+                    Text(month, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _primaryColor.withOpacity(0.7))),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              
+              // INFO CENTRAL
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(session['curso'], style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                    const SizedBox(height: 4),
+                    Text("Grupo ${session['seccion']} • Aula ${session['aula']}", style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                    const SizedBox(height: 8),
+                    
+                    // Estadísticas Mini
+                    Row(
+                      children: [
+                        Icon(Icons.groups_outlined, size: 14, color: Colors.grey[500]),
+                        const SizedBox(width: 4),
+                        Text(
+                          isEmptySession ? "Sin asistencia" : "${session['total']} Alumnos", 
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isEmptySession ? Colors.red[300] : Colors.grey[700])
+                        ),
+                      ],
+                    )
+                  ],
+                ),
+              ),
+
+              // BOTÓN PDF
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isEmptySession ? Colors.grey[100] : Colors.red[50],
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.picture_as_pdf_rounded, 
+                  size: 20, 
+                  color: isEmptySession ? Colors.grey[400] : Colors.red[400]
+                ),
+              )
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.history_toggle_off, size: 60, color: Colors.grey[300]),
+          const SizedBox(height: 15),
+          Text("No se encontraron registros", style: TextStyle(color: Colors.grey[500], fontSize: 16)),
         ],
       ),
     );

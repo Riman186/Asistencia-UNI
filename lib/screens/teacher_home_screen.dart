@@ -5,8 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
-// Importaciones
 import 'attendance_student_list_screen.dart';
 import 'teacher_history_screen.dart';
 import 'teacher_profile_screen.dart';
@@ -21,41 +21,72 @@ class TeacherHomeScreen extends StatefulWidget {
 class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   int _selectedIndex = 0;
   final User? user = FirebaseAuth.instance.currentUser;
+  
+  // Variable para saber si el idioma cargó
+  bool _localeLoaded = false;
 
-  final Map<int, String> _weekDays = {
-    1: "Lunes", 2: "Martes", 3: "Miércoles", 4: "Jueves", 
-    5: "Viernes", 6: "Sábado", 7: "Domingo"
-  };
+  // Colores corporativos
+  final Color _primaryColor = const Color(0xFF0D47A1);
+  final Color _backgroundColor = const Color(0xFFF4F6F9);
+  final Color _cardColor = Colors.white;
+
+  @override
+  void initState() {
+    super.initState();
+    // Inicializar formato de fechas en español para evitar el error rojo
+    initializeDateFormatting('es_ES', null).then((_) {
+      if (mounted) setState(() => _localeLoaded = true);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final List<Widget> widgetOptions = <Widget>[
-      _buildFullScheduleTab(), // Tab 0: Todas las clases + Lógica 15 min
-      _buildSessionsTab(),     // Tab 1: Sesiones generadas (Control Asistencia)
-      const TeacherHistoryScreen(), // Tab 2
-      const TeacherProfileScreen(), // Tab 3
+      _buildFullScheduleTab(),
+      _buildSessionsTab(),
+      const TeacherHistoryScreen(),
+      const TeacherProfileScreen(),
     ];
 
     return Scaffold(
-      body: widgetOptions.elementAt(_selectedIndex),
-      bottomNavigationBar: BottomNavigationBar(
-        items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(icon: Icon(Icons.calendar_month), label: "Horario"),
-          BottomNavigationBarItem(icon: Icon(Icons.playlist_add_check), label: "Control"),
-          BottomNavigationBarItem(icon: Icon(Icons.history), label: "Historial"),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: "Perfil"),
+      backgroundColor: _backgroundColor,
+      body: SafeArea(
+        child: widgetOptions.elementAt(_selectedIndex),
+      ),
+      bottomNavigationBar: NavigationBar(
+        backgroundColor: Colors.white,
+        elevation: 5,
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) => setState(() => _selectedIndex = index),
+        indicatorColor: _primaryColor.withOpacity(0.1),
+        destinations: [
+          NavigationDestination(
+            icon: const Icon(Icons.calendar_today_outlined),
+            selectedIcon: Icon(Icons.calendar_month, color: _primaryColor),
+            label: "Horario",
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.playlist_add_check_outlined),
+            selectedIcon: Icon(Icons.playlist_add_check_circle, color: _primaryColor),
+            label: "Control",
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.history_outlined),
+            selectedIcon: Icon(Icons.history, color: _primaryColor),
+            label: "Historial",
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person, color: _primaryColor),
+            label: "Perfil",
+          ),
         ],
-        currentIndex: _selectedIndex,
-        selectedItemColor: const Color(0xFF0D47A1),
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        onTap: (index) => setState(() => _selectedIndex = index),
       ),
     );
   }
 
   // ========================================================================
-  // TAB 0: HORARIO COMPLETO (CON LÓGICA DE HABILITACIÓN 15 MINUTOS)
+  // TAB 0: HORARIO
   // ========================================================================
   Widget _buildFullScheduleTab() {
     if (user == null) return const Center(child: Text("Error de sesión"));
@@ -67,11 +98,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
         final userData = snapshot.data!.data() as Map<String, dynamic>;
         final String nombre = userData['nombre_completo'] ?? "Docente";
+        final String primerNombre = nombre.split(' ')[0]; 
         final List<dynamic> schedule = userData['horario'] ?? [];
 
-        // Ordenar clases: Primero por día (Lunes=1), luego por hora
+        // Ordenar horario
         final dayOrder = {"Lunes": 1, "Martes": 2, "Miércoles": 3, "Jueves": 4, "Viernes": 5, "Sábado": 6, "Domingo": 7};
-        
         schedule.sort((a, b) {
           int dayA = dayOrder[a['dia']] ?? 8;
           int dayB = dayOrder[b['dia']] ?? 8;
@@ -79,244 +110,293 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           return (a['hora_inicio'] ?? "").compareTo(b['hora_inicio'] ?? "");
         });
 
-        return Scaffold(
-          backgroundColor: Colors.grey[50],
-          appBar: AppBar(
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("Hola, $nombre", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const Text("Tu Horario Completo", style: TextStyle(fontSize: 12)),
-              ],
+        return Column(
+          children: [
+            _buildCustomHeader(title: "Hola, $primerNombre", subtitle: "Tu agenda académica"),
+            Expanded(
+              child: schedule.isEmpty
+                  ? _buildEmptyState("No hay horario configurado", Icons.calendar_today_outlined)
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+                      itemCount: schedule.length,
+                      itemBuilder: (context, index) {
+                        return _buildModernClassCard(schedule[index]);
+                      },
+                    ),
             ),
-            elevation: 0,
-            backgroundColor: Colors.white,
-            foregroundColor: const Color(0xFF0D47A1),
-            automaticallyImplyLeading: false,
-          ),
-          body: schedule.isEmpty
-              ? const Center(child: Text("No has configurado tu horario."))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: schedule.length,
-                  itemBuilder: (context, index) {
-                    return _buildTimeLimitedClassCard(schedule[index]);
-                  },
-                ),
+          ],
         );
       },
     );
   }
 
-  // TARJETA CON LÓGICA DE TIEMPO (15 MINUTOS)
-  Widget _buildTimeLimitedClassCard(dynamic clase) {
+  Widget _buildCustomHeader({required String title, required String subtitle}) {
+    String dateText = "Cargando...";
+    if (_localeLoaded) {
+      dateText = DateFormat('EEEE, d MMMM', 'es_ES').format(DateTime.now()).toUpperCase();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 5))
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(subtitle, style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+          const SizedBox(height: 4),
+          Text(title, style: TextStyle(color: _primaryColor, fontSize: 26, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(20)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.today, size: 16, color: _primaryColor),
+                const SizedBox(width: 6),
+                Text(dateText, style: TextStyle(color: _primaryColor, fontWeight: FontWeight.bold, fontSize: 12)),
+              ],
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModernClassCard(dynamic clase) {
+    final weekDays = {1: "Lunes", 2: "Martes", 3: "Miércoles", 4: "Jueves", 5: "Viernes", 6: "Sábado", 7: "Domingo"};
     final now = DateTime.now();
-    final String currentDayName = _weekDays[now.weekday] ?? "Lunes";
-    
-    // 1. Validar Día
+    final String currentDayName = weekDays[now.weekday] ?? "Lunes";
     bool isToday = clase['dia'] == currentDayName;
-
-    // 2. Validar Hora (Ventana de 15 minutos)
+    
     bool isTimeValid = false;
-    String debugMsg = "";
+    String statusText = "Próximamente";
+    Color statusColor = Colors.grey;
 
+    // Lógica de validación de 15 minutos
     if (isToday) {
       try {
-        // Parsear hora inicio (ej: "07:00 AM")
-        // Nota: Asumimos formato HH:mm a o HH:mm.
-        // Usamos un parser manual simple para robustez si intl falla por locale
-        String timeStr = clase['hora_inicio']; // "07:00 AM"
-        TimeOfDay startTime = _parseTimeOfDay(timeStr);
-        
-        // Convertir a DateTime de hoy para comparar
+        TimeOfDay startTime = _parseTimeOfDay(clase['hora_inicio']);
         DateTime startDateTime = DateTime(now.year, now.month, now.day, startTime.hour, startTime.minute);
         DateTime endWindow = startDateTime.add(const Duration(minutes: 15));
 
-        // LOGICA: Habilitado desde el inicio hasta 15 min después
         if (now.isAfter(startDateTime.subtract(const Duration(minutes: 5))) && now.isBefore(endWindow)) {
-          // Damos 5 min de margen antes por si el reloj está mal
           isTimeValid = true;
+          statusText = "EN CURSO";
+          statusColor = Colors.green;
+        } else if (now.isAfter(endWindow)) {
+          statusText = "Finalizada";
+          statusColor = Colors.red.shade300;
         } else {
-          // Mensaje de ayuda
-          if (now.isBefore(startDateTime)) {
-            debugMsg = "Inicia a las $timeStr";
-          } else {
-            debugMsg = "Tiempo expirado (15 min)";
-          }
+          statusText = "Hoy a las ${clase['hora_inicio']}";
+          statusColor = _primaryColor;
         }
-
-      } catch (e) {
-        print("Error parseando hora: $e");
-      }
+      } catch (e) { print("Error hora: $e"); }
     } else {
-      debugMsg = "Clase de ${clase['dia']}";
+      statusText = clase['dia'];
+      statusColor = Colors.blueGrey;
     }
 
-    // UI de la tarjeta
     bool isEnabled = isToday && isTimeValid;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      color: isEnabled ? Colors.white : Colors.grey[200],
-      elevation: isEnabled ? 3 : 0,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Row(
-          children: [
-            // Indicador de día
-            Container(
-              width: 50,
-              height: 50,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: isEnabled ? Colors.blue.shade100 : Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(8)
-              ),
-              child: Text(
-                clase['dia'].substring(0, 3).toUpperCase(),
-                style: TextStyle(fontWeight: FontWeight.bold, color: isEnabled ? Colors.blue.shade900 : Colors.grey),
-              ),
-            ),
-            const SizedBox(width: 15),
-            // Info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 15, offset: const Offset(0, 4)),
+          if (isEnabled) BoxShadow(color: Colors.green.withOpacity(0.2), blurRadius: 10),
+        ],
+        border: isEnabled ? Border.all(color: Colors.green, width: 1.5) : null,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Row(
+            children: [
+              // Columna Hora
+              Column(
                 children: [
-                  Text(clase['curso'], style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isEnabled ? Colors.black : Colors.grey)),
-                  Text("${clase['hora_inicio']} • Aula ${clase['aula']}", style: TextStyle(color: Colors.grey[600])),
-                  if (!isEnabled)
-                    Text(debugMsg, style: const TextStyle(fontSize: 11, color: Colors.redAccent, fontStyle: FontStyle.italic)),
+                  Text(clase['hora_inicio'].toString().split(' ')[0], 
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
+                  Text(clase['hora_inicio'].toString().split(' ').last, 
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500], fontWeight: FontWeight.bold)),
                 ],
               ),
-            ),
-            // Botón Generar QR
-            IconButton(
-              onPressed: isEnabled ? () => _showQRDialog(clase) : null,
-              icon: const Icon(Icons.qr_code_2),
-              color: isEnabled ? const Color(0xFF0D47A1) : Colors.grey,
-              iconSize: 32,
-              tooltip: isEnabled ? "Generar QR" : "Fuera de horario",
-            )
-          ],
+              Container(height: 40, width: 1, color: Colors.grey[200], margin: const EdgeInsets.symmetric(horizontal: 15)),
+              
+              // Detalles
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(statusText.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor)),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(clase['curso'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(Icons.meeting_room_outlined, size: 14, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Text("Aula ${clase['aula']}", style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // Botón de Acción (Usamos InkWell con onTap explícito)
+              if (isEnabled)
+                Material(
+                  color: _primaryColor,
+                  shape: const CircleBorder(),
+                  elevation: 4,
+                  shadowColor: _primaryColor.withOpacity(0.4),
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: () => _showQRDialog(clase),
+                    child: const Padding(
+                      padding: EdgeInsets.all(12.0),
+                      child: Icon(Icons.qr_code_2, color: Colors.white, size: 24),
+                    ),
+                  ),
+                )
+              else
+                Icon(Icons.lock_outline, color: Colors.grey[300]),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  TimeOfDay _parseTimeOfDay(String t) {
-    // Formato esperado "HH:mm" o "HH:mm AM/PM"
-    // Limpiamos espacios
-    t = t.trim();
-    bool isPm = t.toLowerCase().contains("pm");
-    bool isAm = t.toLowerCase().contains("am");
-    
-    // Quitamos am/pm para parsear los números
-    String cleanTime = t.replaceAll(RegExp(r'[a-zA-Z]'), '').trim();
-    List<String> parts = cleanTime.split(':');
-    
-    int h = int.parse(parts[0]);
-    int m = int.parse(parts[1]);
-
-    if (isPm && h != 12) h += 12;
-    if (isAm && h == 12) h = 0;
-
-    return TimeOfDay(hour: h, minute: m);
-  }
-
   // ========================================================================
-  // TAB 1: CONTROL DE ASISTENCIA (SESIONES GENERADAS)
+  // TAB 1: CONTROL DE ASISTENCIA (SESIONES)
   // ========================================================================
   Widget _buildSessionsTab() {
     if (user == null) return const Center(child: Text("Error"));
 
-    return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        title: const Text("Control de Asistencia"),
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF0D47A1),
-        elevation: 0,
-        automaticallyImplyLeading: false,
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        // Consultamos SESIONES (QRs creados), no horario estático
-        stream: FirebaseFirestore.instance
-            .collection('sesiones')
-            .where('profesorId', isEqualTo: user!.uid)
-            .orderBy('timestamp', descending: true) // Más recientes primero
-            .limit(20) // Limitamos para no sobrecargar
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) return Center(child: Text("Error: ${snapshot.error}"));
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+    return Column(
+      children: [
+        _buildCustomHeader(title: "Control Asistencia", subtitle: "Sesiones activas y recientes"),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('sesiones')
+                .where('profesorId', isEqualTo: user!.uid)
+                .orderBy('timestamp', descending: true) 
+                .limit(20)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) return Center(child: Text("Error: ${snapshot.error}"));
+              if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
 
-          final docs = snapshot.data!.docs;
+              final docs = snapshot.data!.docs;
+              if (docs.isEmpty) return _buildEmptyState("No hay registros recientes.", Icons.qr_code_scanner);
 
-          if (docs.isEmpty) {
-            return const Center(child: Text("No has generado códigos QR recientemente."));
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final sessionData = docs[index].data() as Map<String, dynamic>;
-              // Usamos el ID del documento sesión o datos de la clase para filtrar
-              // NOTA: Para que AttendanceStudentList funcione, necesita 'curso', 'seccion', 'fecha'
-              
-              return Card(
-                elevation: 2,
-                margin: const EdgeInsets.only(bottom: 12),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(sessionData['curso'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          Text(sessionData['fecha'], style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                        ],
-                      ),
-                      const SizedBox(height: 5),
-                      Text("Grupo: ${sessionData['seccion']} • Hora: ${sessionData['hora_inicio']}"),
-                      const SizedBox(height: 15),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            // NAVEGAR A LISTA DE ESTUDIANTES
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => AttendanceStudentListScreen(clase: sessionData),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.visibility),
-                          label: const Text("VER REGISTRO DE ASISTENCIA"),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF0D47A1),
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      )
-                    ],
-                  ),
-                ),
+              return ListView.builder(
+                padding: const EdgeInsets.all(20),
+                itemCount: docs.length,
+                itemBuilder: (context, index) {
+                  final session = docs[index].data() as Map<String, dynamic>;
+                  return _buildSessionCard(session, context);
+                },
               );
             },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSessionCard(Map<String, dynamic> session, BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(16),
+        leading: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
+          child: Icon(Icons.class_outlined, color: _primaryColor),
+        ),
+        title: Text(session['curso'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Row(
+            children: [
+              Icon(Icons.calendar_today, size: 12, color: Colors.grey[600]),
+              const SizedBox(width: 4),
+              Text(session['fecha'], style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              const SizedBox(width: 12),
+              Icon(Icons.access_time, size: 12, color: Colors.grey[600]),
+              const SizedBox(width: 4),
+              Text(session['hora_inicio'], style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            ],
+          ),
+        ),
+        trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => AttendanceStudentListScreen(clase: session)),
           );
         },
       ),
     );
   }
 
+  Widget _buildEmptyState(String text, IconData icon) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 60, color: Colors.grey[300]),
+          const SizedBox(height: 15),
+          Text(text, style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+        ],
+      ),
+    );
+  }
+
   // ========================================================================
-  // LÓGICA QR (IGUAL QUE ANTES)
+  // LÓGICA Y DIÁLOGOS
   // ========================================================================
+  TimeOfDay _parseTimeOfDay(String t) {
+    t = t.trim();
+    bool isPm = t.toLowerCase().contains("pm");
+    bool isAm = t.toLowerCase().contains("am");
+    String cleanTime = t.replaceAll(RegExp(r'[a-zA-Z]'), '').trim();
+    List<String> parts = cleanTime.split(':');
+    int h = int.parse(parts[0]);
+    int m = int.parse(parts[1]);
+    if (isPm && h != 12) h += 12;
+    if (isAm && h == 12) h = 0;
+    return TimeOfDay(hour: h, minute: m);
+  }
+
   void _showQRDialog(Map<String, dynamic> clase) {
     showDialog(
       context: context,
@@ -331,8 +411,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   Future<void> _saveSession(Map<String, dynamic> clase) async {
     final now = DateTime.now();
     final todayStr = now.toIso8601String().split('T')[0];
-    
-    // Guardar en 'sesiones' para que aparezca en la pestaña 1
     await FirebaseFirestore.instance.collection('sesiones').add({
       'profesorId': user!.uid,
       'curso': clase['curso'],
@@ -345,7 +423,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   }
 }
 
-// --- DIÁLOGO QR ---
+// --- DIÁLOGO QR (VERSIÓN ROBUSTA) ---
 class QRTimerDialog extends StatefulWidget {
   final Map<String, dynamic> claseData;
   final VoidCallback onFinished;
@@ -358,29 +436,42 @@ class QRTimerDialog extends StatefulWidget {
 class _QRTimerDialogState extends State<QRTimerDialog> {
   late Timer _timer;
   int _seconds = 900; // 15 minutos
-  String _qrData = "";
+  String _qrData = "error";
 
   @override
   void initState() {
     super.initState();
-    // Generar datos para el estudiante
-    final data = {
-      'profesorId': FirebaseAuth.instance.currentUser!.uid,
-      'curso': widget.claseData['curso'],
-      'seccion': widget.claseData['seccion'],
-      'aula': widget.claseData['aula'],
-      'fecha': DateTime.now().toIso8601String().split('T')[0], // Importante: fecha del día
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
-    _qrData = jsonEncode(data);
+    _generateQRData();
     
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (_seconds > 0) {
-        setState(() => _seconds--);
+        if (mounted) setState(() => _seconds--);
       } else {
         _finish();
       }
     });
+  }
+
+  void _generateQRData() {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      final uid = user?.uid ?? "no-user-id";
+      
+      final data = {
+        'profesorId': uid,
+        'curso': widget.claseData['curso'] ?? 'Curso',
+        'seccion': widget.claseData['seccion'] ?? 'A',
+        'aula': widget.claseData['aula'] ?? 'S/A',
+        'fecha': DateTime.now().toIso8601String().split('T')[0],
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+      
+      setState(() {
+        _qrData = jsonEncode(data);
+      });
+    } catch (e) {
+      setState(() => _qrData = "Error: $e");
+    }
   }
 
   void _finish() {
@@ -399,26 +490,94 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
   Widget build(BuildContext context) {
     int m = _seconds ~/ 60;
     int s = _seconds % 60;
+    
     return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text("Escanear Asistencia", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-          const SizedBox(height: 5),
-          Text("${widget.claseData['curso']}", style: const TextStyle(color: Colors.grey)),
-          const SizedBox(height: 20),
-          SizedBox(height: 220, width: 220, child: QrImageView(data: _qrData)),
-          const SizedBox(height: 20),
-          Text("${m.toString().padLeft(2,'0')}:${s.toString().padLeft(2,'0')}", style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFF0D47A1))),
-          const Text("Tiempo restante de validez", style: TextStyle(fontSize: 10, color: Colors.red)),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _finish, 
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            child: const Text("Finalizar y Guardar")
-          )
-        ],
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+      contentPadding: const EdgeInsets.all(25),
+      content: SizedBox(
+        width: 300,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text("Escanea Ahora", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                IconButton(
+                  icon: const Icon(Icons.close), 
+                  onPressed: () => Navigator.pop(context), 
+                  padding: EdgeInsets.zero, 
+                  constraints: const BoxConstraints(),
+                )
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+              child: Text("${widget.claseData['curso']} - Aula ${widget.claseData['aula']}", 
+                style: TextStyle(color: Colors.blue.shade900, fontWeight: FontWeight.w600, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 25),
+            
+            // CONTENEDOR QR ROBUSTO
+            Container(
+              width: 220,
+              height: 220,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.grey.shade200),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15)]
+              ),
+              child: Center(
+                child: QrImageView(
+                  data: _qrData,
+                  version: QrVersions.auto, // Corrección: Auto versión
+                  size: 200.0,
+                  backgroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF0D47A1),
+                  padding: const EdgeInsets.all(0),
+                  errorStateBuilder: (cxt, err) {
+                    return Center(child: Text("Error QR: $err", style: const TextStyle(fontSize: 10, color: Colors.red)));
+                  },
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 25),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.timer_outlined, color: Colors.red, size: 20),
+                const SizedBox(width: 8),
+                Text("${m.toString().padLeft(2,'0')}:${s.toString().padLeft(2,'0')}", 
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
+              ],
+            ),
+            const SizedBox(height: 5),
+            const Text("Código válido por 15 minutos", style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _finish, 
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0D47A1), 
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+                ),
+                child: const Text("Finalizar Sesión")
+              ),
+            )
+          ],
+        ),
       ),
     );
   }
