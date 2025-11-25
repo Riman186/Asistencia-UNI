@@ -34,20 +34,17 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
     _loadAttendanceHistory();
   }
 
-  // --- 1. CARGAR DATOS Y PROCESAR ESTADÍSTICAS ---
+  // --- 1. CARGAR DATOS ---
   Future<void> _loadAttendanceHistory() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     try {
-      // Obtenemos todas las sesiones del profesor
       final sessionsQuery = await FirebaseFirestore.instance
           .collection('sesiones')
           .where('profesorId', isEqualTo: user.uid)
           .get();
 
-      // Obtenemos todas las asistencias del profesor (para luego filtrar en memoria)
-      // Nota: En apps muy grandes, esto debería ser una consulta paginada o por sesión específica.
       final attendanceQuery = await FirebaseFirestore.instance
           .collection('asistencias')
           .where('profesorId', isEqualTo: user.uid)
@@ -60,16 +57,13 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
         final String sCurso = sData['curso'] ?? 'Sin Nombre';
         final String sSeccion = sData['seccion'] ?? '';
         final String sFecha = sData['fecha'] ?? '';
-        // Intentamos usar el ID de sesión si existe, sino fallback a la fecha/curso
         final String sessionId = sessionDoc.id;
         
         final dynamic timestampRaw = sData['timestamp']; 
         final Timestamp timestamp = (timestampRaw is Timestamp) ? timestampRaw : Timestamp.now();
 
-        // Filtramos las asistencias que corresponden a esta sesión
         final matchingAttendance = attendanceQuery.docs.where((doc) {
           final aData = doc.data();
-          // Prioridad: coincidencia por sessionId (nueva lógica), fallback a coincidencia manual
           if (aData.containsKey('sessionId')) {
             return aData['sessionId'] == sessionId;
           }
@@ -78,7 +72,6 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                  aData['fecha'] == sFecha;
         }).toList();
 
-        // Contadores
         int varones = 0;
         int mujeres = 0;
         int justificados = 0;
@@ -91,7 +84,6 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
           String sexo = aData['alumnoSexo'] ?? '';
           String estado = aData['estado'] ?? 'Presente';
 
-          // Normalización básica de texto para el conteo
           if (sexo.toLowerCase().startsWith('m')) varones++;
           else if (sexo.toLowerCase().startsWith('f')) mujeres++;
 
@@ -114,14 +106,12 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
         });
       }
 
-      // Ordenar por fecha descendente (más reciente primero)
       combinedList.sort((a, b) {
         Timestamp tA = a['sortTime'];
         Timestamp tB = b['sortTime'];
         return tB.compareTo(tA);
       });
 
-      // Extraer cursos únicos para el filtro
       final courseNames = combinedList.map((s) => s['curso'] as String).toSet().toList();
       courseNames.sort();
 
@@ -134,7 +124,7 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
         });
       }
     } catch (e) {
-      print("Error cargando historial: $e");
+      debugPrint("Error cargando historial: $e");
       if(mounted) setState(() => _isLoading = false);
     }
   }
@@ -151,193 +141,205 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
     });
   }
 
-  // --- GENERACIÓN PDF (DISEÑO MODERNO) ---
+  // --- GENERACIÓN PDF SIN IMÁGENES (GARANTIZADO) ---
   Future<void> _generateSessionReport(Map<String, dynamic> session) async {
-    final List<dynamic> registros = session['registros'];
-    if (registros.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Sin registros para reporte"),
-          backgroundColor: Colors.orange));
-      return;
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Preparando documento..."), duration: Duration(milliseconds: 800))
+    );
 
-    // Cargar Logo
-    final netImage = await imageFromAssetBundle('assets/images/LogoUni.jpg');
+    try {
+      final List<dynamic> registros = session['registros'];
+      if (registros.isEmpty) {
+        throw Exception("No hay registros para generar el reporte.");
+      }
 
-    final pdf = pw.Document();
-    
-    // Colores PDF
-    final PdfColor uniBlue = PdfColor.fromInt(0xFF0D47A1);
-    final PdfColor lightBlue = PdfColor.fromInt(0xFFE3F2FD);
-    final PdfColor grayText = PdfColor.fromInt(0xFF616161);
+      final pdf = pw.Document();
+      
+      // Colores PDF
+      final PdfColor uniBlue = PdfColor.fromInt(0xFF0D47A1);
+      final PdfColor lightBlue = PdfColor.fromInt(0xFFE3F2FD);
+      final PdfColor grayText = PdfColor.fromInt(0xFF616161);
 
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.symmetric(vertical: 40, horizontal: 40),
-        build: (pw.Context context) {
-          return [
-            // CABECERA
-            pw.Row(
-              crossAxisAlignment: pw.CrossAxisAlignment.center,
-              children: [
-                pw.Container(
-                  width: 60, 
-                  height: 60, 
-                  child: pw.Image(netImage),
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(40),
+          build: (pw.Context context) {
+            return [
+              // CABECERA TIPOGRÁFICA (SIN LOGO)
+              pw.Container(
+                decoration: const pw.BoxDecoration(
+                  border: pw.Border(left: pw.BorderSide(color: PdfColors.blue900, width: 4))
                 ),
-                pw.SizedBox(width: 15),
-                pw.Column(
+                padding: const pw.EdgeInsets.only(left: 10),
+                child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text("UNIVERSIDAD NACIONAL DE INGENIERÍA",
                         style: pw.TextStyle(
-                            fontSize: 14,
+                            fontSize: 16,
                             fontWeight: pw.FontWeight.bold,
                             color: uniBlue)),
-                    pw.Text("REPORTE DE ASISTENCIA",
+                    pw.Text("REPORTE OFICIAL DE ASISTENCIA",
                         style: pw.TextStyle(
                             fontSize: 10,
-                            letterSpacing: 1.5,
+                            letterSpacing: 2.0,
                             color: grayText)),
                   ],
                 ),
-                pw.Spacer(),
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.end,
-                  children: [
-                    pw.Text("FECHA",
-                        style: pw.TextStyle(fontSize: 8, color: grayText)),
-                    pw.Text(session['fecha'],
-                        style: pw.TextStyle(
-                            fontSize: 12, fontWeight: pw.FontWeight.bold)),
-                  ],
-                ),
-              ],
-            ),
-            pw.SizedBox(height: 10),
-            pw.Divider(color: uniBlue, thickness: 2),
-            pw.SizedBox(height: 20),
-
-            // INFO CURSO
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text("ASIGNATURA",
-                        style: pw.TextStyle(
-                            fontSize: 9,
-                            color: grayText,
-                            fontWeight: pw.FontWeight.bold)),
-                    pw.Text(session['curso'].toString().toUpperCase(),
-                        style: pw.TextStyle(
-                            fontSize: 18,
-                            fontWeight: pw.FontWeight.bold,
-                            color: uniBlue)),
-                  ],
-                ),
-                pw.Row(
-                  children: [
-                    _buildModernInfoBlock("GRUPO", session['seccion']),
-                    pw.SizedBox(width: 30),
-                    _buildModernInfoBlock("AULA", session['aula']),
-                  ],
-                ),
-              ],
-            ),
-            pw.SizedBox(height: 25),
-
-            // TARJETA DE ESTADÍSTICAS (KPIs)
-            pw.Container(
-              padding: const pw.EdgeInsets.symmetric(vertical: 15, horizontal: 20),
-              decoration: pw.BoxDecoration(
-                color: PdfColors.grey100,
-                borderRadius: pw.BorderRadius.circular(8),
               ),
-              child: pw.Row(
+              
+              pw.SizedBox(height: 20),
+              
+              pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  _buildStatBadge("TOTAL", "${session['total']}", uniBlue),
-                  _buildVerticalDivider(),
-                  _buildStatBadge("VARONES", "${session['varones']}", PdfColors.blueGrey700),
-                  _buildVerticalDivider(),
-                  _buildStatBadge("MUJERES", "${session['mujeres']}", PdfColors.blueGrey700),
-                  _buildVerticalDivider(),
-                  _buildStatBadge("JUSTIFICADOS", "${session['justificados']}", PdfColors.orange800),
+                  pw.Text("FECHA DE EMISIÓN", style: pw.TextStyle(fontSize: 9, color: grayText)),
+                  pw.Text(session['fecha'], style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                ]
+              ),
+              
+              pw.SizedBox(height: 10),
+              pw.Divider(color: uniBlue, thickness: 1),
+              pw.SizedBox(height: 20),
+
+              // INFO DEL CURSO
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text("ASIGNATURA", style: pw.TextStyle(fontSize: 9, color: grayText, fontWeight: pw.FontWeight.bold)),
+                      pw.Text(session['curso'].toString().toUpperCase(), style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: uniBlue)),
+                    ],
+                  ),
+                  pw.Row(
+                    children: [
+                      _buildModernInfoBlock("GRUPO", session['seccion']),
+                      pw.SizedBox(width: 30),
+                      _buildModernInfoBlock("AULA", session['aula']),
+                    ],
+                  ),
                 ],
               ),
-            ),
-            pw.SizedBox(height: 25),
+              pw.SizedBox(height: 25),
 
-            // TABLA DE ALUMNOS
-            pw.Table(
-              columnWidths: {
-                0: const pw.FixedColumnWidth(30), // #
-                1: const pw.FlexColumnWidth(3),   // Nombre
-                2: const pw.FlexColumnWidth(1.5), // Carnet
-                3: const pw.FixedColumnWidth(70), // Estado
-                4: const pw.FixedColumnWidth(60), // Hora
-              },
-              border: pw.TableBorder.symmetric(
-                inside: const pw.BorderSide(color: PdfColors.grey300, width: 0.5),
-              ),
-              children: [
-                // Encabezado Tabla
-                pw.TableRow(
-                  decoration: pw.BoxDecoration(
-                    color: uniBlue,
-                    borderRadius: const pw.BorderRadius.vertical(top: pw.Radius.circular(4)),
-                  ),
+              // TARJETAS DE ESTADÍSTICAS (SISTEMA EXPERTO)
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(vertical: 15, horizontal: 20),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.grey100,
+                  borderRadius: pw.BorderRadius.circular(8),
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    _buildHeaderCell("#"),
-                    _buildHeaderCell("ESTUDIANTE", align: pw.TextAlign.left),
-                    _buildHeaderCell("CARNET"),
-                    _buildHeaderCell("ESTADO"),
-                    _buildHeaderCell("HORA"),
+                    _buildStatBadge("TOTAL", "${session['total']}", uniBlue),
+                    _buildVerticalDivider(),
+                    _buildStatBadge("VARONES", "${session['varones']}", PdfColors.blueGrey700),
+                    _buildVerticalDivider(),
+                    _buildStatBadge("MUJERES", "${session['mujeres']}", PdfColors.blueGrey700),
+                    _buildVerticalDivider(),
+                    _buildStatBadge("JUSTIFICADOS", "${session['justificados']}", PdfColors.orange800),
                   ],
                 ),
-                // Filas
-                ...List.generate(registros.length, (index) {
-                  final r = registros[index];
-                  final isEven = index % 2 == 0;
-                  return pw.TableRow(
+              ),
+              
+              pw.SizedBox(height: 30),
+
+              // TÍTULO TABLA
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.only(bottom: 5),
+                decoration: const pw.BoxDecoration(
+                  border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey300, width: 1))
+                ),
+                child: pw.Text(
+                  "LISTADO GENERAL DE ASISTENCIA",
+                  style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: uniBlue, letterSpacing: 1.0),
+                ),
+              ),
+              pw.SizedBox(height: 10),
+
+              // TABLA DETALLADA
+              pw.Table(
+                columnWidths: {
+                  0: const pw.FixedColumnWidth(30), 
+                  1: const pw.FlexColumnWidth(3),   
+                  2: const pw.FlexColumnWidth(1.5), 
+                  3: const pw.FixedColumnWidth(70), 
+                  4: const pw.FixedColumnWidth(60), 
+                },
+                border: pw.TableBorder.symmetric(
+                  inside: const pw.BorderSide(color: PdfColors.grey300, width: 0.5),
+                ),
+                children: [
+                  pw.TableRow(
                     decoration: pw.BoxDecoration(
-                      color: isEven ? PdfColors.white : lightBlue,
+                      color: uniBlue,
+                      borderRadius: const pw.BorderRadius.vertical(top: pw.Radius.circular(4)),
                     ),
                     children: [
-                      _buildCell("${index + 1}", align: pw.TextAlign.center, isBold: true),
-                      _buildCell(r['alumnoNombre'] ?? '-', padding: 6),
-                      _buildCell(r['alumnoCarnet'] ?? '-', align: pw.TextAlign.center),
-                      _buildStatusCell(r['estado'] ?? 'Presente'),
-                      _buildCell(r['hora_registro'] ?? '-', align: pw.TextAlign.center, color: grayText),
+                      _buildHeaderCell("#"),
+                      _buildHeaderCell("ESTUDIANTE", align: pw.TextAlign.left),
+                      _buildHeaderCell("CARNET"),
+                      _buildHeaderCell("ESTADO"),
+                      _buildHeaderCell("HORA"),
                     ],
-                  );
-                }),
-              ],
-            ),
-            
-            // PIE DE PAGINA
-            pw.Spacer(),
-            pw.Divider(color: PdfColors.grey300),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text("Generado automáticamente por Asistencia UNI", style: pw.TextStyle(fontSize: 8, color: grayText)),
-                pw.Text("Página ${context.pageNumber} de ${context.pagesCount}", style: pw.TextStyle(fontSize: 8, color: grayText)),
-              ]
-            )
-          ];
-        },
-      ),
-    );
+                  ),
+                  ...List.generate(registros.length, (index) {
+                    final r = registros[index];
+                    final isEven = index % 2 == 0;
+                    return pw.TableRow(
+                      decoration: pw.BoxDecoration(color: isEven ? PdfColors.white : lightBlue),
+                      children: [
+                        _buildCell("${index + 1}", align: pw.TextAlign.center, isBold: true),
+                        _buildCell(r['alumnoNombre'] ?? '-', padding: 6),
+                        _buildCell(r['alumnoCarnet'] ?? '-', align: pw.TextAlign.center),
+                        _buildStatusCell(r['estado'] ?? 'Presente'),
+                        _buildCell(r['hora_registro'] ?? '-', align: pw.TextAlign.center, color: grayText),
+                      ],
+                    );
+                  }),
+                ],
+              ),
+              
+              // PIE DE PÁGINA
+              pw.Spacer(),
+              pw.Divider(color: PdfColors.grey300),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text("Sistema de Asistencia UNI - 2025", style: pw.TextStyle(fontSize: 8, color: grayText)),
+                  pw.Text("Página ${context.pageNumber} de ${context.pagesCount}", style: pw.TextStyle(fontSize: 8, color: grayText)),
+                ]
+              )
+            ];
+          },
+        ),
+      );
 
-    await Printing.sharePdf(
-        bytes: await pdf.save(), filename: "Asistencia_${session['curso']}_${session['fecha']}.pdf");
+      // 4. ABRIR VISTA PREVIA (Funciona en Web y Móvil)
+      await Printing.layoutPdf(
+        onLayout: (format) async => pdf.save(),
+        name: "Asistencia_${session['curso']}",
+      );
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Error: $e"), 
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4)
+          )
+        );
+      }
+    }
   }
 
-  // --- Helpers para PDF ---
+  // --- Widgets Auxiliares PDF ---
   pw.Widget _buildModernInfoBlock(String label, String value) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -412,7 +414,6 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
       backgroundColor: _backgroundColor,
       body: Column(
         children: [
-          // HEADER PERSONALIZADO
           Container(
             padding: const EdgeInsets.fromLTRB(24, 60, 24, 25),
             width: double.infinity,
@@ -429,7 +430,7 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                 Text("Consulta y exporta tus registros pasados", style: TextStyle(color: Colors.grey[600], fontSize: 14)),
                 const SizedBox(height: 20),
                 
-                // FILTROS
+                // Buscador y Filtro
                 Row(
                   children: [
                     Expanded(
@@ -472,7 +473,7 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
             ),
           ),
 
-          // LISTA
+          // LISTA DE SESIONES
           Expanded(
             child: _isLoading 
               ? const Center(child: CircularProgressIndicator())
@@ -509,7 +510,6 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              // FECHA BADGE
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
@@ -524,8 +524,6 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                 ),
               ),
               const SizedBox(width: 16),
-              
-              // INFORMACIÓN CENTRAL
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -535,21 +533,16 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                     Text("Grupo ${session['seccion']} • Aula ${session['aula']}", style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                     const SizedBox(height: 8),
                     
-                    // ESTADÍSTICAS (ICONS)
+                    // Estadísticas en Tarjeta
                     isEmptySession 
                     ? Text("Sin asistencia", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.red[300]))
                     : Row(
                       children: [
-                        // Total
                         _buildMiniStat(Icons.groups, "${session['total']}", Colors.grey[700]!),
                         const SizedBox(width: 12),
-                        // Varones
                         _buildMiniStat(Icons.male, "${session['varones']}", Colors.blue[700]!),
                         const SizedBox(width: 8),
-                        // Mujeres
                         _buildMiniStat(Icons.female, "${session['mujeres']}", Colors.pink[400]!),
-                        
-                        // Justificados (solo si hay)
                         if (session['justificados'] > 0) ...[
                           const SizedBox(width: 8),
                           _buildMiniStat(Icons.assignment_late, "${session['justificados']}", Colors.orange[700]!),
@@ -559,8 +552,6 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                   ],
                 ),
               ),
-
-              // PDF ICON
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
