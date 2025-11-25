@@ -45,7 +45,7 @@ class _StudentRegisterScreenState extends State<StudentRegisterScreen> {
   ];
 
   final List<String> _modalidades = [
-    "Matutino", "Vespertino", "Sabatino", "Dominical"
+    "Diario", "Sabatino", "Dominical"
   ];
 
   // --- LÓGICA DE REGISTRO ---
