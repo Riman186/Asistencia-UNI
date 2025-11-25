@@ -1,9 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart'; // <--- IMPORTANTE
 
 class TeacherHistoryScreen extends StatefulWidget {
   const TeacherHistoryScreen({super.key});
@@ -34,7 +37,6 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
     _loadAttendanceHistory();
   }
 
-  // --- 1. CARGAR DATOS ---
   Future<void> _loadAttendanceHistory() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -142,17 +144,16 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
     });
   }
 
-  // --- GENERACIÓN PDF (AHORA PERMITE LISTAS VACÍAS) ---
+  // --- FUNCIÓN PRINCIPAL DE GENERACIÓN Y DESCARGA ---
   Future<void> _generateSessionReport(Map<String, dynamic> session) async {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Generando documento PDF..."), duration: Duration(seconds: 1))
+      const SnackBar(content: Text("Generando PDF..."), duration: Duration(seconds: 1))
     );
 
     try {
       final List<dynamic> registros = session['registros'];
       
-      // *** CAMBIO: Ya no lanzamos error si está vacío, solo seguimos ***
-      
+      // Construcción del PDF
       final pdf = pw.Document();
       final PdfColor uniBlue = PdfColor.fromInt(0xFF0D47A1);
       final PdfColor lightBlue = PdfColor.fromInt(0xFFE3F2FD);
@@ -162,9 +163,23 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(40),
+          footer: (pw.Context context) {
+            return pw.Column(
+              children: [
+                pw.Divider(color: PdfColors.grey300),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text("Generado por App Asistencia UNI", style: pw.TextStyle(fontSize: 8, color: grayText)),
+                    pw.Text("Página ${context.pageNumber} de ${context.pagesCount}", style: pw.TextStyle(fontSize: 8, color: grayText)),
+                  ]
+                )
+              ]
+            );
+          },
           build: (pw.Context context) {
             return [
-              // CABECERA
+              // Cabecera
               pw.Container(
                 width: double.infinity,
                 decoration: const pw.BoxDecoration(
@@ -174,17 +189,14 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    pw.Text("UNIVERSIDAD NACIONAL DE INGENIERÍA",
-                        style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: uniBlue)),
+                    pw.Text("UNIVERSIDAD NACIONAL DE INGENIERÍA", style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: uniBlue)),
                     pw.SizedBox(height: 4),
-                    pw.Text("REPORTE OFICIAL DE ASISTENCIA",
-                        style: pw.TextStyle(fontSize: 10, letterSpacing: 3.0, color: grayText)),
+                    pw.Text("REPORTE OFICIAL DE ASISTENCIA", style: pw.TextStyle(fontSize: 10, letterSpacing: 3.0, color: grayText)),
                   ],
                 ),
               ),
-              
               pw.SizedBox(height: 20),
-              
+              // Fecha
               pw.Align(
                 alignment: pw.Alignment.centerRight,
                 child: pw.Column(
@@ -195,12 +207,10 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                   ]
                 ),
               ),
-              
               pw.SizedBox(height: 10),
               pw.Divider(color: uniBlue, thickness: 1),
               pw.SizedBox(height: 20),
-
-              // INFO CURSO
+              // Datos Clase
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
@@ -221,8 +231,7 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                 ],
               ),
               pw.SizedBox(height: 25),
-
-              // KPI CARDS
+              // KPIs
               pw.Container(
                 padding: const pw.EdgeInsets.symmetric(vertical: 15, horizontal: 20),
                 decoration: pw.BoxDecoration(
@@ -242,24 +251,18 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                   ],
                 ),
               ),
-              
               pw.SizedBox(height: 30),
-
-              // TABLA
+              // Tabla
               pw.Container(
                 width: double.infinity,
                 padding: const pw.EdgeInsets.only(bottom: 5),
                 decoration: const pw.BoxDecoration(
                   border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey300, width: 1))
                 ),
-                child: pw.Text(
-                  "LISTADO DETALLADO DE ESTUDIANTES",
-                  style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: uniBlue, letterSpacing: 1.0),
-                ),
+                child: pw.Text("LISTADO DETALLADO DE ESTUDIANTES", style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: uniBlue, letterSpacing: 1.0)),
               ),
               pw.SizedBox(height: 10),
-
-              // VALIDACIÓN VISUAL SI ESTÁ VACÍO
+              
               if (registros.isEmpty)
                 pw.Container(
                   padding: const pw.EdgeInsets.all(20),
@@ -269,10 +272,7 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                     borderRadius: pw.BorderRadius.circular(5),
                     color: PdfColors.grey50
                   ),
-                  child: pw.Center(
-                    child: pw.Text("No se registraron asistentes en esta sesión.", 
-                      style: pw.TextStyle(color: PdfColors.grey600, fontStyle: pw.FontStyle.italic))
-                  )
+                  child: pw.Center(child: pw.Text("No se registraron asistentes en esta sesión.", style: pw.TextStyle(color: PdfColors.grey600, fontStyle: pw.FontStyle.italic)))
                 )
               else
                 pw.Table(
@@ -283,15 +283,10 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                     3: const pw.FixedColumnWidth(70), 
                     4: const pw.FixedColumnWidth(60), 
                   },
-                  border: pw.TableBorder.symmetric(
-                    inside: const pw.BorderSide(color: PdfColors.grey300, width: 0.5),
-                  ),
+                  border: pw.TableBorder.symmetric(inside: const pw.BorderSide(color: PdfColors.grey300, width: 0.5)),
                   children: [
                     pw.TableRow(
-                      decoration: pw.BoxDecoration(
-                        color: uniBlue,
-                        borderRadius: const pw.BorderRadius.vertical(top: pw.Radius.circular(4)),
-                      ),
+                      decoration: pw.BoxDecoration(color: uniBlue, borderRadius: const pw.BorderRadius.vertical(top: pw.Radius.circular(4))),
                       children: [
                         _buildHeaderCell("#"),
                         _buildHeaderCell("ESTUDIANTE", align: pw.TextAlign.left),
@@ -316,34 +311,62 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                     }),
                   ],
                 ),
-              
-              pw.Spacer(),
-              pw.Divider(color: PdfColors.grey300),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text("Generado por App Asistencia UNI", style: pw.TextStyle(fontSize: 8, color: grayText)),
-                  pw.Text("Página ${context.pageNumber} de ${context.pagesCount}", style: pw.TextStyle(fontSize: 8, color: grayText)),
-                ]
-              )
             ];
           },
         ),
       );
 
-      await Printing.layoutPdf(
-        onLayout: (format) async => pdf.save(),
-        name: "Asistencia_${session['curso']}",
-      );
+      // --- LÓGICA MULTIPLATAFORMA PARA GUARDAR/DESCARGAR ---
+      final bytes = await pdf.save();
+      final String fileName = "Asistencia_${session['curso']}_${session['fecha']}.pdf";
+
+      if (Platform.isAndroid || Platform.isIOS) {
+        // === MÓVIL: USAR SHARE (WhatsApp, Email, Archivos) ===
+        await Printing.sharePdf(
+          bytes: bytes,
+          filename: fileName,
+        );
+      } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        // === ESCRITORIO: USAR "GUARDAR COMO..." ===
+        String? outputFile = await FilePicker.platform.saveFile(
+          dialogTitle: 'Guardar Reporte de Asistencia',
+          fileName: fileName,
+          type: FileType.custom,
+          allowedExtensions: ['pdf'],
+        );
+
+        if (outputFile != null) {
+          // El usuario eligió una ruta
+          final file = File(outputFile);
+          await file.writeAsBytes(bytes);
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text("Guardado en: $outputFile"), 
+                backgroundColor: Colors.green,
+                action: SnackBarAction(
+                  label: "OK", 
+                  textColor: Colors.white,
+                  onPressed: () {},
+                ),
+              )
+            );
+          }
+        } else {
+          // El usuario canceló
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Descarga cancelada"), backgroundColor: Colors.orange)
+            );
+          }
+        }
+      }
 
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Error inesperado: $e"), 
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4)
-          )
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red)
         );
       }
     }

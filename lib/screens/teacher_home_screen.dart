@@ -84,44 +84,70 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   }
 
   // ========================================================================
-  // TAB 0: HORARIO
+  // TAB 0: HORARIO (MODIFICADO PARA BLOQUEAR SESIONES REPETIDAS)
   // ========================================================================
   Widget _buildFullScheduleTab() {
     if (user == null) return const Center(child: Text("Error de sesión"));
 
+    // 1. Obtenemos la fecha de hoy para filtrar
+    final String todayDate = DateTime.now().toIso8601String().split('T')[0];
+
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(user!.uid).snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+      builder: (context, userSnapshot) {
+        if (!userSnapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-        final userData = snapshot.data!.data() as Map<String, dynamic>;
+        final userData = userSnapshot.data!.data() as Map<String, dynamic>;
         final String nombre = userData['nombre_completo'] ?? "Docente";
         final String primerNombre = nombre.split(' ')[0]; 
         final List<dynamic> schedule = userData['horario'] ?? [];
 
-        final dayOrder = {"Lunes": 1, "Martes": 2, "Miércoles": 3, "Jueves": 4, "Viernes": 5, "Sábado": 6, "Domingo": 7};
-        schedule.sort((a, b) {
-          int dayA = dayOrder[a['dia']] ?? 8;
-          int dayB = dayOrder[b['dia']] ?? 8;
-          if (dayA != dayB) return dayA.compareTo(dayB);
-          return (a['hora_inicio'] ?? "").compareTo(b['hora_inicio'] ?? "");
-        });
+        // 2. ESCUCHAMOS LAS SESIONES CREADAS HOY
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('sesiones')
+              .where('profesorId', isEqualTo: user!.uid)
+              .where('fecha', isEqualTo: todayDate) // Solo las de hoy
+              .snapshots(),
+          builder: (context, sessionSnapshot) {
+            // Lista de identificadores de clases ya creadas hoy (Ej: "Física I-Grupo A")
+            Set<String> createdSessionsKeys = {};
+            
+            if (sessionSnapshot.hasData) {
+              for (var doc in sessionSnapshot.data!.docs) {
+                var data = doc.data() as Map<String, dynamic>;
+                // Clave única: Curso + Sección
+                createdSessionsKeys.add("${data['curso']}-${data['seccion']}");
+              }
+            }
 
-        return Column(
-          children: [
-            _buildCustomHeader(title: "Hola, $primerNombre", subtitle: "Tu agenda académica"),
-            Expanded(
-              child: schedule.isEmpty
-                  ? _buildEmptyState("No hay horario configurado", Icons.calendar_today_outlined)
-                  : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
-                      itemCount: schedule.length,
-                      itemBuilder: (context, index) {
-                        return _buildModernClassCard(schedule[index]);
-                      },
-                    ),
-            ),
-          ],
+            // Ordenar horario
+            final dayOrder = {"Lunes": 1, "Martes": 2, "Miércoles": 3, "Jueves": 4, "Viernes": 5, "Sábado": 6, "Domingo": 7};
+            schedule.sort((a, b) {
+              int dayA = dayOrder[a['dia']] ?? 8;
+              int dayB = dayOrder[b['dia']] ?? 8;
+              if (dayA != dayB) return dayA.compareTo(dayB);
+              return (a['hora_inicio'] ?? "").compareTo(b['hora_inicio'] ?? "");
+            });
+
+            return Column(
+              children: [
+                _buildCustomHeader(title: "Hola, $primerNombre", subtitle: "Tu agenda académica"),
+                Expanded(
+                  child: schedule.isEmpty
+                      ? _buildEmptyState("No hay horario configurado", Icons.calendar_today_outlined)
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+                          itemCount: schedule.length,
+                          itemBuilder: (context, index) {
+                            // Pasamos el Set de sesiones creadas para verificar
+                            return _buildModernClassCard(schedule[index], createdSessionsKeys);
+                          },
+                        ),
+                ),
+              ],
+            );
+          }
         );
       },
     );
@@ -167,42 +193,59 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     );
   }
 
-  Widget _buildModernClassCard(dynamic clase) {
+  Widget _buildModernClassCard(dynamic clase, Set<String> createdSessions) {
     final weekDays = {1: "Lunes", 2: "Martes", 3: "Miércoles", 4: "Jueves", 5: "Viernes", 6: "Sábado", 7: "Domingo"};
     final now = DateTime.now();
     final String currentDayName = weekDays[now.weekday] ?? "Lunes";
     bool isToday = clase['dia'] == currentDayName;
     
+    // Verificar si YA SE CREÓ hoy
+    String classKey = "${clase['curso']}-${clase['seccion']}";
+    bool isAlreadyCreated = createdSessions.contains(classKey);
+
     bool isTimeValid = false;
     String statusText = "Próximamente";
     Color statusColor = Colors.grey;
+    bool isButtonEnabled = false;
 
     if (isToday) {
-      try {
-        TimeOfDay startTime = _parseTimeOfDay(clase['hora_inicio']);
-        DateTime startDateTime = DateTime(now.year, now.month, now.day, startTime.hour, startTime.minute);
-        DateTime endWindow = startDateTime.add(const Duration(minutes: 15));
+      if (isAlreadyCreated) {
+        // CASO 1: YA SE TOMÓ ASISTENCIA HOY
+        statusText = "ASISTENCIA COMPLETADA";
+        statusColor = Colors.blue.shade800;
+        isButtonEnabled = false; // Bloqueado
+      } else {
+        // CASO 2: NO SE HA TOMADO, VERIFICAMOS HORA
+        try {
+          TimeOfDay startTime = _parseTimeOfDay(clase['hora_inicio']);
+          DateTime startDateTime = DateTime(now.year, now.month, now.day, startTime.hour, startTime.minute);
+          DateTime endWindow = startDateTime.add(const Duration(minutes: 15)); // Ventana de 15 min
 
-        // Permitimos abrir la clase desde 5 min antes hasta 15 min después
-        if (now.isAfter(startDateTime.subtract(const Duration(minutes: 5))) && now.isBefore(endWindow)) {
-          isTimeValid = true;
-          statusText = "EN CURSO";
-          statusColor = Colors.green;
-        } else if (now.isAfter(endWindow)) {
-          statusText = "Finalizada";
-          statusColor = Colors.red.shade300;
-        } else {
-          statusText = "Hoy a las ${clase['hora_inicio']}";
-          statusColor = _primaryColor;
-        }
-      } catch (e) { print("Error hora: $e"); }
+          // Permitimos abrir desde 10 min antes hasta que termine la ventana
+          if (now.isAfter(startDateTime.subtract(const Duration(minutes: 10))) && now.isBefore(endWindow)) {
+            isTimeValid = true;
+            statusText = "DISPONIBLE";
+            statusColor = Colors.green;
+            isButtonEnabled = true;
+          } else if (now.isAfter(endWindow)) {
+            statusText = "FINALIZADA (Sin Registro)";
+            statusColor = Colors.red.shade300;
+            isButtonEnabled = false; // Ya pasó el tiempo
+          } else {
+            statusText = "Hoy a las ${clase['hora_inicio']}";
+            statusColor = _primaryColor;
+            isButtonEnabled = false; // Aún no es la hora
+          }
+        } catch (e) { print("Error hora: $e"); }
+      }
     } else {
       statusText = clase['dia'];
       statusColor = Colors.blueGrey;
+      isButtonEnabled = false;
     }
 
-    // TODO: Para pruebas, puedes poner isEnabled = true siempre.
-    bool isEnabled = isToday && isTimeValid; 
+    // TODO: Para pruebas fuera de horario, puedes descomentar esto:
+    // isButtonEnabled = isToday && !isAlreadyCreated; 
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -211,9 +254,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 15, offset: const Offset(0, 4)),
-          if (isEnabled) BoxShadow(color: Colors.green.withOpacity(0.2), blurRadius: 10),
+          if (isButtonEnabled) BoxShadow(color: Colors.green.withOpacity(0.2), blurRadius: 10),
         ],
-        border: isEnabled ? Border.all(color: Colors.green, width: 1.5) : null,
+        border: isButtonEnabled ? Border.all(color: Colors.green, width: 1.5) : null,
       ),
       child: Material(
         color: Colors.transparent,
@@ -258,7 +301,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 ),
               ),
 
-              if (isEnabled)
+              // BOTÓN DINÁMICO
+              if (isAlreadyCreated)
+                 const Icon(Icons.check_circle, color: Colors.green, size: 30) // Ya completada
+              else if (isButtonEnabled)
                 Material(
                   color: _primaryColor,
                   shape: const CircleBorder(),
@@ -274,7 +320,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   ),
                 )
               else
-                Icon(Icons.lock_outline, color: Colors.grey[300]),
+                Icon(Icons.lock_outline, color: Colors.grey[300]), // Bloqueado
             ],
           ),
         ),
@@ -388,7 +434,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
   // --- GESTIÓN DE SESIONES SEGURA ---
 
-  // 1. Crear sesión con estado ABIERTO
   Future<String> _createSession(Map<String, dynamic> clase) async {
     final now = DateTime.now();
     final docRef = await FirebaseFirestore.instance.collection('sesiones').add({
@@ -399,12 +444,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       'fecha': now.toIso8601String().split('T')[0],
       'hora_inicio': DateFormat('hh:mm a').format(now),
       'timestamp': FieldValue.serverTimestamp(),
-      'estado': 'abierto', // <--- Bandera de seguridad
+      'estado': 'abierto',
     });
     return docRef.id;
   }
 
-  // 2. Cerrar sesión al terminar el timer o cerrar diálogo
   Future<void> _closeSession(String sessionId) async {
     await FirebaseFirestore.instance.collection('sesiones').doc(sessionId).update({
       'estado': 'cerrado',
@@ -412,7 +456,22 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   }
 
   void _showQRDialog(Map<String, dynamic> clase) async {
-    // Loader mientras se crea la sesión
+    // DOBLE VERIFICACIÓN: Consultar de nuevo si existe antes de crear
+    // (Para evitar que se cree si el usuario fue muy rápido antes de que se actualice la UI)
+    final String todayDate = DateTime.now().toIso8601String().split('T')[0];
+    final existing = await FirebaseFirestore.instance
+        .collection('sesiones')
+        .where('profesorId', isEqualTo: user!.uid)
+        .where('fecha', isEqualTo: todayDate)
+        .where('curso', isEqualTo: clase['curso'])
+        .where('seccion', isEqualTo: clase['seccion'])
+        .get();
+
+    if (existing.docs.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Ya existe una sesión activa o finalizada para esta clase hoy."), backgroundColor: Colors.orange));
+      return;
+    }
+
     showDialog(
       context: context, 
       barrierDismissible: false, 
@@ -420,24 +479,21 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     );
 
     try {
-      // A. Crear la sesión en la BD y obtener el ID
       String sessionId = await _createSession(clase);
       
       if (!mounted) return;
-      Navigator.pop(context); // Cerrar loader
+      Navigator.pop(context);
 
-      // B. Mostrar el QR pasándole el sessionId
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => QRTimerDialog(
-          // Inyectamos el ID en los datos para que el QR lo contenga
           claseData: {...clase, 'sessionId': sessionId},
           onFinished: () => _closeSession(sessionId),
         ),
       );
     } catch (e) {
-      Navigator.pop(context); // Cerrar loader si falla
+      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al iniciar sesión: $e")));
     }
   }
@@ -483,7 +539,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
         'seccion': widget.claseData['seccion'] ?? 'A',
         'aula': widget.claseData['aula'] ?? 'S/A',
         'fecha': DateTime.now().toIso8601String().split('T')[0],
-        'sessionId': widget.claseData['sessionId'], // <--- Dato clave para la seguridad
+        'sessionId': widget.claseData['sessionId'],
       };
       
       setState(() {
@@ -496,7 +552,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
 
   void _finish() {
     _timer.cancel();
-    widget.onFinished(); // Llama a _closeSession en el padre
+    widget.onFinished();
     if (mounted) Navigator.pop(context);
   }
 
@@ -527,7 +583,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
                 const Text("Escanea Ahora", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                 IconButton(
                   icon: const Icon(Icons.close), 
-                  onPressed: _finish, // Usar _finish para asegurar que se cierre la sesión en BD
+                  onPressed: _finish, 
                   padding: EdgeInsets.zero, 
                   constraints: const BoxConstraints(),
                 )
