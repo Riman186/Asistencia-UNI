@@ -121,8 +121,9 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
           : (totalClassesAttended / totalRealClassesGlobal).clamp(0.0, 1.0);
       
       String risk = "Bajo"; 
-      if (globalPercent < 0.70) risk = "Alto";
-      else if (globalPercent < 0.80) risk = "Advertencia";
+      if (globalPercent < 0.70) {
+        risk = "Alto";
+      } else if (globalPercent < 0.80) risk = "Advertencia";
 
       if (mounted) {
         setState(() {
