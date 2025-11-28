@@ -30,100 +30,108 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
     if (user == null) return;
 
     try {
-      // 1. Cargar datos del estudiante y su GRUPO
+      // 1. OBTENER DATOS DEL ALUMNO Y SU GRUPO
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      String studentGroup = "A"; // Valor por defecto si no existe campo
+      String studentGroup = "A"; // Valor por defecto
       
       if (userDoc.exists) {
-        // Obtenemos el grupo del estudiante para filtrar solo las sesiones que le corresponden
         studentGroup = userDoc.data()?['grupo'] ?? "A";
-        
-        setState(() {
-          _studentName = userDoc.data()?['nombre_completo'] ?? "Estudiante";
-          _studentCode = userDoc.data()?['carnet'] ?? "S/N";
-        });
+        if (mounted) {
+          setState(() {
+            _studentName = userDoc.data()?['nombre_completo'] ?? "Estudiante";
+            _studentCode = userDoc.data()?['carnet'] ?? "S/N";
+          });
+        }
       }
 
-      // 2. Cargar asistencias del estudiante
-      final querySnapshot = await FirebaseFirestore.instance
+      // 2. EL UNIVERSO: BUSCAR TODAS LAS SESIONES DEL GRUPO (ASISTIDAS O NO)
+      // Esta es la verdad absoluta de lo que se ha dictado.
+      final allSessionsQuery = await FirebaseFirestore.instance
+          .collection('sesiones')
+          .where('seccion', isEqualTo: studentGroup)
+          // .where('estado', isEqualTo: 'cerrado') // Descomentar si solo cuentan clases terminadas
+          .get();
+
+      // Mapa: Curso -> Total de clases dictadas
+      Map<String, int> totalSessionsPerCourse = {};
+      for (var doc in allSessionsQuery.docs) {
+        String curso = doc.data()['curso'] ?? "Desconocido";
+        totalSessionsPerCourse[curso] = (totalSessionsPerCourse[curso] ?? 0) + 1;
+      }
+
+      // 3. MI REALIDAD: BUSCAR MIS ASISTENCIAS
+      final myAttendanceQuery = await FirebaseFirestore.instance
           .collection('asistencias')
           .where('alumnoId', isEqualTo: user.uid)
           .get();
 
-      final docs = querySnapshot.docs;
-
-      // 3. Agrupar asistencias por curso
-      Map<String, int> attendanceCount = {};
-      for (var doc in docs) {
+      // Mapa: Curso -> Clases a las que fui
+      Map<String, int> myAttendancePerCourse = {};
+      for (var doc in myAttendanceQuery.docs) {
         String curso = doc.data()['curso'] ?? "Desconocido";
-        attendanceCount[curso] = (attendanceCount[curso] ?? 0) + 1;
+        myAttendancePerCourse[curso] = (myAttendancePerCourse[curso] ?? 0) + 1;
       }
 
-      // 4. Calcular estadísticas DINÁMICAS
+      // 4. CÁLCULO DE RIESGO CORREGIDO
+      // Iteramos sobre totalSessionsPerCourse (Lo que dicta el profe).
+      // Si el profe dictó clase y yo no estoy en mi lista de asistencia, tengo falta.
+      
       List<Map<String, dynamic>> stats = [];
-      int totalClassesAttended = 0;
-      int totalRealClassesGlobal = 0; // Suma de todas las sesiones reales dictadas
+      int totalClassesGlobal = 0;
+      int myTotalAttendances = 0;
       List<Map<String, dynamic>> newAlerts = [];
 
-      // Iteramos por cada curso que el alumno ha marcado asistencia alguna vez
-      for (var entry in attendanceCount.entries) {
-        String curso = entry.key;
-        int attended = entry.value;
+      totalSessionsPerCourse.forEach((curso, totalReal) {
+        // Obtenemos mis asistencias. Si no existe la clave, es 0 (Ausencia total)
+        int myAttended = myAttendancePerCourse[curso] ?? 0;
 
-        // CONSULTA CLAVE: ¿Cuántas sesiones ha creado el profesor para este curso y mi grupo?
-        final sessionsQuery = await FirebaseFirestore.instance
-            .collection('sesiones')
-            .where('curso', isEqualTo: curso)
-            .where('seccion', isEqualTo: studentGroup) // Filtramos por el grupo del estudiante
-            .get();
+        // Corrección de datos sucios: Si por error tengo más asistencias que clases reales, lo topo.
+        if (myAttended > totalReal) {
+           // Esto puede pasar si borraste sesiones de prueba pero no las asistencias
+           // Para no romper la gráfica, asumimos 100%
+           totalReal = myAttended; 
+        }
 
-        int totalReal = sessionsQuery.docs.length;
+        if (totalReal == 0) totalReal = 1; // Evitar división por cero
 
-        // Corrección de seguridad:
-        // 1. Si es la primera clase y totalReal es 0 (por error de sincro), evitamos división por 0.
-        if (totalReal == 0) totalReal = 1; 
-        // 2. Si el alumno tiene más asistencias que clases reales (ej. pruebas), limitamos al 100%.
-        if (attended > totalReal) totalReal = attended;
+        double percent = (myAttended / totalReal).clamp(0.0, 1.0);
 
-        double percent = (attended / totalReal).clamp(0.0, 1.0);
-        
         stats.add({
           "name": curso,
           "percent": percent,
-          "attended": attended,
-          "total": totalReal // Ahora se muestra el total real de clases dictadas
+          "attended": myAttended,
+          "total": totalReal
         });
 
-        totalClassesAttended += attended;
-        totalRealClassesGlobal += totalReal;
+        totalClassesGlobal += totalReal;
+        myTotalAttendances += myAttended;
 
-        // Lógica de Alertas
+        // Generar Alertas
         if (percent < 0.70) {
           newAlerts.add({
             "course": curso,
-            "msg": "Riesgo crítico. Asistencia debajo del 70%.",
+            "msg": "CRÍTICO: Has asistido a $myAttended de $totalReal clases.",
             "type": "danger",
             "date": "Hoy"
           });
         } else if (percent < 0.80) {
            newAlerts.add({
             "course": curso,
-            "msg": "Atención. Te acercas al límite de faltas.",
+            "msg": "ADVERTENCIA: Estás perdiendo el derecho a examen.",
             "type": "warning",
             "date": "Hoy"
           });
         }
-      }
+      });
 
       // Cálculo Global
-      double globalPercent = totalRealClassesGlobal == 0 
+      double globalPercent = totalClassesGlobal == 0 
           ? 1.0 
-          : (totalClassesAttended / totalRealClassesGlobal).clamp(0.0, 1.0);
+          : (myTotalAttendances / totalClassesGlobal).clamp(0.0, 1.0);
       
       String risk = "Bajo"; 
-      if (globalPercent < 0.70) {
-        risk = "Alto";
-      } else if (globalPercent < 0.80) risk = "Advertencia";
+      if (globalPercent < 0.70) risk = "Alto";
+      else if (globalPercent < 0.80) risk = "Medio";
 
       if (mounted) {
         setState(() {
@@ -136,20 +144,20 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
       }
 
     } catch (e) {
-      print("Error calculando riesgo: $e");
+      debugPrint("Error calculando riesgo: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Color _getRiskColor(String level) {
     if (level == "Alto") return Colors.red;
-    if (level == "Advertencia") return Colors.amber.shade700;
+    if (level == "Medio") return Colors.amber.shade700;
     return Colors.green;
   }
   
   IconData _getRiskIcon(String level) {
     if (level == "Alto") return Icons.error_outline;
-    if (level == "Advertencia") return Icons.warning_amber_rounded;
+    if (level == "Medio") return Icons.warning_amber_rounded;
     return Icons.check_circle_outline;
   }
 
@@ -174,7 +182,7 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("Control de Asistencia", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                const Text("Estadísticas en Tiempo Real", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                 Text(_studentName, style: const TextStyle(color: Colors.white, fontSize: 14)),
                 Align(
                   alignment: Alignment.centerRight,
@@ -189,7 +197,7 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  // RIESGO
+                  // TARJETA RIESGO
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(20),
@@ -211,15 +219,15 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
                           child: Icon(_getRiskIcon(_riskLevel), size: 40, color: Colors.white),
                         ),
                         const SizedBox(height: 10),
-                        Text(_riskLevel, style: TextStyle(color: _getRiskColor(_riskLevel), fontWeight: FontWeight.bold, fontSize: 18)),
-                        const Text("Categoría de Riesgo Académico", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                        Text(_riskLevel.toUpperCase(), style: TextStyle(color: _getRiskColor(_riskLevel), fontWeight: FontWeight.bold, fontSize: 22)),
+                        const Text("Nivel de Riesgo Académico", style: TextStyle(color: Colors.black54, fontSize: 12)),
                       ],
                     ),
                   ),
                   
                   const SizedBox(height: 20),
 
-                  // BARRA TOTAL
+                  // BARRA GLOBAL
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -233,7 +241,7 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text("Asistencia Total", style: TextStyle(fontSize: 16)),
+                            const Text("Asistencia Global", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                             Text("${(_totalAttendancePercentage * 100).toInt()}%", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blue.shade800)),
                           ],
                         ),
@@ -244,27 +252,18 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
                             value: _totalAttendancePercentage,
                             minHeight: 12,
                             backgroundColor: Colors.grey.shade300,
-                            color: Colors.black87,
+                            color: _totalAttendancePercentage < 0.7 ? Colors.red : Colors.blue.shade800,
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text("Semestre 2025-I", style: TextStyle(color: Colors.grey, fontSize: 12)),
-                            if (_totalAttendancePercentage >= 0.8)
-                              Row(children: const [Icon(Icons.trending_up, size: 16, color: Colors.green), SizedBox(width: 4), Text("En buen estado", style: TextStyle(color: Colors.green, fontSize: 12, fontWeight: FontWeight.bold))])
-                            else
-                              Row(children: const [Icon(Icons.trending_down, size: 16, color: Colors.red), SizedBox(width: 4), Text("Requiere atención", style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold))])
-                          ],
-                        )
+                        const SizedBox(height: 8),
+                        const Text("Calculado sobre el total de clases impartidas a tu grupo.", style: TextStyle(color: Colors.grey, fontSize: 11)),
                       ],
                     ),
                   ),
 
                   const SizedBox(height: 20),
 
-                  // LISTA CURSOS
+                  // LISTA DETALLADA
                   if (_courseStats.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.all(20),
@@ -276,44 +275,31 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text("Asistencia por Curso", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                        const Text("Detalle por Asignatura", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 20),
                         ..._courseStats.map((course) => _buildCourseProgress(course)),
                       ],
                     ),
                   )
                   else
-                    const Center(child: Text("Aún no tienes asistencias registradas.")),
+                    const Padding(
+                      padding: EdgeInsets.all(20.0),
+                      child: Text("No se encontraron registros de clases para tu grupo.", style: TextStyle(color: Colors.grey)),
+                    ),
                   
                   const SizedBox(height: 20),
 
                   // ALERTAS
                   if (_alerts.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text("Alertas Recientes", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(color: Colors.red.shade100, borderRadius: BorderRadius.circular(10)),
-                              child: Text("${_alerts.length} alertas", style: TextStyle(fontSize: 10, color: Colors.red.shade800, fontWeight: FontWeight.bold)),
-                            )
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-                        ..._alerts.map((alert) => _buildAlertCard(alert)),
-                      ],
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.only(left: 5, bottom: 10),
+                        child: Text("Alertas Activas", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      ),
+                      ..._alerts.map((alert) => _buildAlertCard(alert)),
+                    ],
                   ),
                 ],
               ),
@@ -325,8 +311,9 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
   }
 
   Widget _buildCourseProgress(Map<String, dynamic> course) {
-    Color progressColor = course['percent'] < 0.7 ? Colors.red : Colors.green;
-    if (course['percent'] >= 0.7 && course['percent'] < 0.8) progressColor = Colors.amber;
+    Color progressColor = Colors.green;
+    if (course['percent'] < 0.7) progressColor = Colors.red;
+    else if (course['percent'] < 0.8) progressColor = Colors.amber;
     
     return Padding(
       padding: const EdgeInsets.only(bottom: 15.0),
@@ -336,19 +323,19 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(course['name'], style: const TextStyle(color: Colors.blueGrey)),
+              Expanded(child: Text(course['name'], style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black87), overflow: TextOverflow.ellipsis)),
               Text("${(course['percent'] * 100).toInt()}% (${course['attended']}/${course['total']})", 
-                style: TextStyle(color: progressColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                style: TextStyle(color: progressColor, fontWeight: FontWeight.bold, fontSize: 13)),
             ],
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 6),
           ClipRRect(
             borderRadius: BorderRadius.circular(5),
             child: LinearProgressIndicator(
               value: course['percent'],
               minHeight: 8,
               backgroundColor: Colors.grey.shade200,
-              color: Colors.black87,
+              color: progressColor,
             ),
           ),
         ],
@@ -357,17 +344,18 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
   }
 
   Widget _buildAlertCard(Map<String, dynamic> alert) {
+    bool isDanger = alert['type'] == 'danger';
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.yellow.shade50,
-        border: Border.all(color: Colors.yellow.shade200),
+        color: isDanger ? Colors.red.shade50 : Colors.orange.shade50,
+        border: Border.all(color: isDanger ? Colors.red.shade200 : Colors.orange.shade200),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         children: [
-          const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+          Icon(Icons.warning_amber_rounded, color: isDanger ? Colors.red : Colors.orange),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -375,14 +363,6 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
               children: [
                 Text(alert['course'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                 Text(alert['msg'], style: const TextStyle(fontSize: 12, color: Colors.black87)),
-                const SizedBox(height: 5),
-                Row(
-                  children: [
-                    const Icon(Icons.access_time, size: 10, color: Colors.grey),
-                    const SizedBox(width: 4),
-                    Text(alert['date'], style: const TextStyle(fontSize: 10, color: Colors.grey)),
-                  ],
-                )
               ],
             ),
           )

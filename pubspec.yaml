@@ -107,3 +107,12 @@ flutter_launcher_icons:
   ios: true
   image_path: "assets/images/logo_uni.jpg"
   min_sdk_android: 21
+  web:
+    generate: true
+    image_path: "assets/images/logo_uni.jpg"
+    background_color: "#ffffff"
+    theme_color: "#ffffff"
+  windows:
+    generate: true
+    image_path: "assets/images/logo_uni.jpg"
+    icon_size: 48

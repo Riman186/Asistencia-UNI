@@ -84,12 +84,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   }
 
   // ========================================================================
-  // TAB 0: HORARIO (MODIFICADO PARA BLOQUEAR SESIONES REPETIDAS)
+  // TAB 0: HORARIO INTELIGENTE
   // ========================================================================
   Widget _buildFullScheduleTab() {
     if (user == null) return const Center(child: Text("Error de sesión"));
 
-    // 1. Obtenemos la fecha de hoy para filtrar
     final String todayDate = DateTime.now().toIso8601String().split('T')[0];
 
     return StreamBuilder<DocumentSnapshot>(
@@ -102,26 +101,28 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         final String primerNombre = nombre.split(' ')[0]; 
         final List<dynamic> schedule = userData['horario'] ?? [];
 
-        // 2. ESCUCHAMOS LAS SESIONES CREADAS HOY
+        // ESCUCHAMOS LAS SESIONES DE HOY EN TIEMPO REAL
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection('sesiones')
               .where('profesorId', isEqualTo: user!.uid)
-              .where('fecha', isEqualTo: todayDate) // Solo las de hoy
+              .where('fecha', isEqualTo: todayDate) 
               .snapshots(),
           builder: (context, sessionSnapshot) {
-            // Lista de identificadores de clases ya creadas hoy (Ej: "Física I-Grupo A")
-            Set<String> createdSessionsKeys = {};
+            
+            // Mapa para saber el estado de cada clase hoy: "Curso-Seccion-Hora" -> Documento de sesión
+            Map<String, DocumentSnapshot> todaysSessionsMap = {};
             
             if (sessionSnapshot.hasData) {
               for (var doc in sessionSnapshot.data!.docs) {
                 var data = doc.data() as Map<String, dynamic>;
-                // Clave única: Curso + Sección
-                createdSessionsKeys.add("${data['curso']}-${data['seccion']}");
+                // CORRECCIÓN CRÍTICA: Incluimos la hora en la clave única
+                String key = "${data['curso']}-${data['seccion']}-${data['hora_inicio']}";
+                todaysSessionsMap[key] = doc;
               }
             }
 
-            // Ordenar horario
+            // Ordenar horario por días y hora
             final dayOrder = {"Lunes": 1, "Martes": 2, "Miércoles": 3, "Jueves": 4, "Viernes": 5, "Sábado": 6, "Domingo": 7};
             schedule.sort((a, b) {
               int dayA = dayOrder[a['dia']] ?? 8;
@@ -140,8 +141,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                           padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
                           itemCount: schedule.length,
                           itemBuilder: (context, index) {
-                            // Pasamos el Set de sesiones creadas para verificar
-                            return _buildModernClassCard(schedule[index], createdSessionsKeys);
+                            return _buildModernClassCard(schedule[index], todaysSessionsMap);
                           },
                         ),
                 ),
@@ -193,59 +193,55 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     );
   }
 
-  Widget _buildModernClassCard(dynamic clase, Set<String> createdSessions) {
+  // --- TARJETA DE CLASE CON LÓGICA DE ESTADOS ---
+  Widget _buildModernClassCard(dynamic clase, Map<String, DocumentSnapshot> todaysSessions) {
     final weekDays = {1: "Lunes", 2: "Martes", 3: "Miércoles", 4: "Jueves", 5: "Viernes", 6: "Sábado", 7: "Domingo"};
     final now = DateTime.now();
     final String currentDayName = weekDays[now.weekday] ?? "Lunes";
+    
     bool isToday = clase['dia'] == currentDayName;
     
-    // Verificar si YA SE CREÓ hoy
-    String classKey = "${clase['curso']}-${clase['seccion']}";
-    bool isAlreadyCreated = createdSessions.contains(classKey);
+    // CORRECCIÓN CRÍTICA: Buscamos usando también la hora
+    String classKey = "${clase['curso']}-${clase['seccion']}-${clase['hora_inicio']}";
+    
+    // Obtenemos la sesión actual de Firebase si existe
+    DocumentSnapshot? sessionDoc = todaysSessions[classKey];
+    String? sessionState = sessionDoc != null ? (sessionDoc.data() as Map<String, dynamic>)['estado'] : null;
 
-    bool isTimeValid = false;
+    // Variables de UI
     String statusText = "Próximamente";
     Color statusColor = Colors.grey;
-    bool isButtonEnabled = false;
+    IconData actionIcon = Icons.lock_outline;
+    bool isActionEnabled = false;
+    VoidCallback? onTapAction;
 
-    if (isToday) {
-      if (isAlreadyCreated) {
-        // CASO 1: YA SE TOMÓ ASISTENCIA HOY
-        statusText = "ASISTENCIA COMPLETADA";
-        statusColor = Colors.blue.shade800;
-        isButtonEnabled = false; // Bloqueado
-      } else {
-        // CASO 2: NO SE HA TOMADO, VERIFICAMOS HORA
-        try {
-          TimeOfDay startTime = _parseTimeOfDay(clase['hora_inicio']);
-          DateTime startDateTime = DateTime(now.year, now.month, now.day, startTime.hour, startTime.minute);
-          DateTime endWindow = startDateTime.add(const Duration(minutes: 15)); // Ventana de 15 min
-
-          // Permitimos abrir desde 10 min antes hasta que termine la ventana
-          if (now.isAfter(startDateTime.subtract(const Duration(minutes: 10))) && now.isBefore(endWindow)) {
-            isTimeValid = true;
-            statusText = "DISPONIBLE";
-            statusColor = Colors.green;
-            isButtonEnabled = true;
-          } else if (now.isAfter(endWindow)) {
-            statusText = "FINALIZADA (Sin Registro)";
-            statusColor = Colors.red.shade300;
-            isButtonEnabled = false; // Ya pasó el tiempo
-          } else {
-            statusText = "Hoy a las ${clase['hora_inicio']}";
-            statusColor = _primaryColor;
-            isButtonEnabled = false; // Aún no es la hora
-          }
-        } catch (e) { print("Error hora: $e"); }
-      }
-    } else {
+    if (!isToday) {
       statusText = clase['dia'];
       statusColor = Colors.blueGrey;
-      isButtonEnabled = false;
+    } else {
+      // ES HOY
+      if (sessionState == 'cerrado') {
+        // 1. FINALIZADA
+        statusText = "FINALIZADA";
+        statusColor = Colors.red.shade400;
+        actionIcon = Icons.check_circle;
+        isActionEnabled = false; // Bloqueado
+      } else if (sessionState == 'abierto') {
+        // 2. EN CURSO (Ya creada, QR activo)
+        statusText = "EN CURSO (QR ACTIVO)";
+        statusColor = Colors.orange.shade700;
+        actionIcon = Icons.qr_code_2;
+        isActionEnabled = true;
+        onTapAction = () => _showQRDialog(clase, existingSessionId: sessionDoc!.id);
+      } else {
+        // 3. SIN INICIAR (Disponible para crear)
+        statusText = "DISPONIBLE PARA INICIAR";
+        statusColor = Colors.green;
+        actionIcon = Icons.play_arrow_rounded;
+        isActionEnabled = true;
+        onTapAction = () => _showQRDialog(clase); // Crear nueva
+      }
     }
-
-    // TODO: Para pruebas fuera de horario, puedes descomentar esto:
-    // isButtonEnabled = isToday && !isAlreadyCreated; 
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -254,9 +250,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 15, offset: const Offset(0, 4)),
-          if (isButtonEnabled) BoxShadow(color: Colors.green.withOpacity(0.2), blurRadius: 10),
+          if (isActionEnabled && sessionState == 'abierto') 
+            BoxShadow(color: Colors.orange.withOpacity(0.2), blurRadius: 10),
         ],
-        border: isButtonEnabled ? Border.all(color: Colors.green, width: 1.5) : null,
+        border: isActionEnabled ? Border.all(color: statusColor.withOpacity(0.5), width: 1.5) : null,
       ),
       child: Material(
         color: Colors.transparent,
@@ -265,6 +262,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           padding: const EdgeInsets.all(20.0),
           child: Row(
             children: [
+              // Hora
               Column(
                 children: [
                   Text(clase['hora_inicio'].toString().split(' ')[0], 
@@ -275,6 +273,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               ),
               Container(height: 40, width: 1, color: Colors.grey[200], margin: const EdgeInsets.symmetric(horizontal: 15)),
               
+              // Info
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -301,26 +300,24 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 ),
               ),
 
-              // BOTÓN DINÁMICO
-              if (isAlreadyCreated)
-                 const Icon(Icons.check_circle, color: Colors.green, size: 30) // Ya completada
-              else if (isButtonEnabled)
+              // Botón de Acción
+              if (isActionEnabled)
                 Material(
-                  color: _primaryColor,
+                  color: statusColor,
                   shape: const CircleBorder(),
                   elevation: 4,
-                  shadowColor: _primaryColor.withOpacity(0.4),
+                  shadowColor: statusColor.withOpacity(0.4),
                   child: InkWell(
                     customBorder: const CircleBorder(),
-                    onTap: () => _showQRDialog(clase),
-                    child: const Padding(
-                      padding: EdgeInsets.all(12.0),
-                      child: Icon(Icons.qr_code_2, color: Colors.white, size: 24),
+                    onTap: onTapAction,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Icon(actionIcon, color: Colors.white, size: 24),
                     ),
                   ),
                 )
               else
-                Icon(Icons.lock_outline, color: Colors.grey[300]), // Bloqueado
+                Icon(actionIcon, color: Colors.grey[300], size: 30), 
             ],
           ),
         ),
@@ -442,7 +439,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       'seccion': clase['seccion'],
       'aula': clase['aula'],
       'fecha': now.toIso8601String().split('T')[0],
-      'hora_inicio': DateFormat('hh:mm a').format(now),
+      'hora_inicio': clase['hora_inicio'], // Guardamos la hora exacta del horario
       'timestamp': FieldValue.serverTimestamp(),
       'estado': 'abierto',
     });
@@ -451,51 +448,44 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
   Future<void> _closeSession(String sessionId) async {
     await FirebaseFirestore.instance.collection('sesiones').doc(sessionId).update({
-      'estado': 'cerrado',
+      'estado': 'cerrado', // ESTO BLOQUEARÁ LA TARJETA
     });
   }
 
-  void _showQRDialog(Map<String, dynamic> clase) async {
-    // DOBLE VERIFICACIÓN: Consultar de nuevo si existe antes de crear
-    // (Para evitar que se cree si el usuario fue muy rápido antes de que se actualice la UI)
-    final String todayDate = DateTime.now().toIso8601String().split('T')[0];
-    final existing = await FirebaseFirestore.instance
-        .collection('sesiones')
-        .where('profesorId', isEqualTo: user!.uid)
-        .where('fecha', isEqualTo: todayDate)
-        .where('curso', isEqualTo: clase['curso'])
-        .where('seccion', isEqualTo: clase['seccion'])
-        .get();
+  void _showQRDialog(Map<String, dynamic> clase, {String? existingSessionId}) async {
+    String sessionId;
 
-    if (existing.docs.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Ya existe una sesión activa o finalizada para esta clase hoy."), backgroundColor: Colors.orange));
-      return;
-    }
-
-    showDialog(
-      context: context, 
-      barrierDismissible: false, 
-      builder: (c) => const Center(child: CircularProgressIndicator())
-    );
-
-    try {
-      String sessionId = await _createSession(clase);
-      
-      if (!mounted) return;
-      Navigator.pop(context);
-
+    if (existingSessionId != null) {
+      // Reabriendo QR existente
+      sessionId = existingSessionId;
+    } else {
+      // Creando nuevo (Primero mostrar loading)
       showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => QRTimerDialog(
-          claseData: {...clase, 'sessionId': sessionId},
-          onFinished: () => _closeSession(sessionId),
-        ),
+        context: context, 
+        barrierDismissible: false, 
+        builder: (c) => const Center(child: CircularProgressIndicator())
       );
-    } catch (e) {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al iniciar sesión: $e")));
+
+      try {
+        sessionId = await _createSession(clase);
+        if (!mounted) return;
+        Navigator.pop(context); // Quitar loading
+      } catch (e) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+        return;
+      }
     }
+
+    // Mostrar el QR con el Timer
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Obliga a usar botón salir
+      builder: (context) => QRTimerDialog(
+        claseData: {...clase, 'sessionId': sessionId},
+        onFinished: () => _closeSession(sessionId), // AL SALIR, SE CIERRA LA SESIÓN
+      ),
+    );
   }
 }
 
@@ -523,7 +513,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
       if (_seconds > 0) {
         if (mounted) setState(() => _seconds--);
       } else {
-        _finish();
+        _finish(); // Se acaba el tiempo -> Cierra
       }
     });
   }
@@ -552,7 +542,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
 
   void _finish() {
     _timer.cancel();
-    widget.onFinished();
+    widget.onFinished(); // ESTO LLAMA A _closeSession
     if (mounted) Navigator.pop(context);
   }
 
@@ -583,7 +573,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
                 const Text("Escanea Ahora", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                 IconButton(
                   icon: const Icon(Icons.close), 
-                  onPressed: _finish, 
+                  onPressed: _finish, // Al dar X, cierra sesión en BD
                   padding: EdgeInsets.zero, 
                   constraints: const BoxConstraints(),
                 )
@@ -636,7 +626,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
               ],
             ),
             const SizedBox(height: 5),
-            const Text("Código válido por 15 minutos", style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const Text("Al finalizar, la clase se marcará como cerrada.", style: TextStyle(fontSize: 12, color: Colors.grey), textAlign: TextAlign.center),
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
