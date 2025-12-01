@@ -1,1 +1,39 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"asistencia-uni-2025","appId":"1:682509714388:android:74e98ad5dbc6e75d4c4c41","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"asistencia-uni-2025","configurations":{"android":"1:682509714388:android:74e98ad5dbc6e75d4c4c41","ios":"1:682509714388:ios:48ff601c0a623c614c4c41","macos":"1:682509714388:ios:48ff601c0a623c614c4c41","web":"1:682509714388:web:ffeaed366f8947a34c4c41","windows":"1:682509714388:web:e4c7c7c2da5c4e834c4c41"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "asistencia-uni-2025",
+          "appId": "1:682509714388:android:74e98ad5dbc6e75d4c4c41",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "asistencia-uni-2025",
+          "configurations": {
+            "android": "1:682509714388:android:74e98ad5dbc6e75d4c4c41",
+            "ios": "1:682509714388:ios:48ff601c0a623c614c4c41",
+            "macos": "1:682509714388:ios:48ff601c0a623c614c4c41",
+            "web": "1:682509714388:web:ffeaed366f8947a34c4c41",
+            "windows": "1:682509714388:web:e4c7c7c2da5c4e834c4c41"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
