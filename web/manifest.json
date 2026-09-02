@@ -1,12 +1,12 @@
 {
-    "name": "asistencia_uni",
-    "short_name": "asistencia_uni",
+    "name": "Asistencia UNI",
+    "short_name": "Asistencia UNI",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#ffffff",
-    "theme_color": "#ffffff",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#F4F6F9",
+    "theme_color": "#0D47A1",
+    "description": "Sistema de control de asistencia universitaria: registro de sesiones, control de alumnos y descarga de reportes en PDF.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

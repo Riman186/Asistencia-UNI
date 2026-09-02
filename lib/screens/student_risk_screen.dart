@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../utils/responsive.dart';
+
 class StudentRiskScreen extends StatefulWidget {
   const StudentRiskScreen({super.key});
 
@@ -177,9 +179,10 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
           // HEADER
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            padding: EdgeInsets.symmetric(horizontal: context.gutter, vertical: 20),
             color: Colors.blue.shade900,
-            child: Column(
+            child: ResponsiveContainer(
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text("Estadísticas en Tiempo Real", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
@@ -190,11 +193,13 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
                 )
               ],
             ),
+            ),
           ),
           
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(context.gutter),
+              child: ResponsiveContainer(
               child: Column(
                 children: [
                   // TARJETA RIESGO
@@ -302,6 +307,7 @@ class _StudentRiskScreenState extends State<StudentRiskScreen> {
                     ],
                   ),
                 ],
+              ),
               ),
             ),
           ),

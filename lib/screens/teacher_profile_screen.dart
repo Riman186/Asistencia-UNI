@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'teacher_login_screen.dart';
 
+import '../utils/responsive.dart';
+
 class TeacherProfileScreen extends StatefulWidget {
   const TeacherProfileScreen({super.key});
 
@@ -364,8 +366,10 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator())
         : SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
+            padding: EdgeInsets.all(context.gutter),
+            child: ResponsiveContainer(
+              maxWidth: Breakpoints.form,
+              child: Column(
               children: [
                 const CircleAvatar(radius: 40, backgroundColor: Colors.blue, child: Icon(Icons.person, size: 50, color: Colors.white)),
                 const SizedBox(height: 20),
@@ -411,8 +415,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                               backgroundColor: Colors.blue.shade100,
                               child: Text(item['dia'].toString().substring(0, 2).toUpperCase(), style: TextStyle(color: Colors.blue.shade900, fontSize: 12, fontWeight: FontWeight.bold)),
                             ),
-                            title: Text(item['curso'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text("${item['hora_inicio']} • Aula ${item['aula']}"),
+                            title: Text(item['curso'], maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Text("${item['hora_inicio']} • Aula ${item['aula']}", maxLines: 1, overflow: TextOverflow.ellipsis),
                             // BOTONES DE ACCIÓN (EDITAR / ELIMINAR)
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -432,6 +436,7 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                       },
                     ),
               ],
+            ),
             ),
           ),
     );

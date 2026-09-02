@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
+import '../utils/responsive.dart';
 import 'teacher_step1_screen.dart';
 import 'teacher_home_screen.dart'; 
 
@@ -68,13 +70,18 @@ class _TeacherLoginScreenState extends State<TeacherLoginScreen> {
           children: [
             // --- CABECERA INSTITUCIONAL ---
             Container(
-              height: 280,
+              width: double.infinity,
+              height: (context.screenHeight * 0.32).clamp(200.0, 300.0),
               decoration: BoxDecoration(
                 color: Colors.blue.shade900,
                 borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(50)),
               ),
-              child: Center(
+              child: SafeArea(
+                bottom: false,
+                child: Center(
+                child: SingleChildScrollView(
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Container(
@@ -83,7 +90,7 @@ class _TeacherLoginScreenState extends State<TeacherLoginScreen> {
                         color: Colors.white.withOpacity(0.1),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.school, size: 80, color: Colors.white),
+                      child: Icon(Icons.school, size: context.isShort ? 52 : 80, color: Colors.white),
                     ),
                     const SizedBox(height: 20),
                     const Text(
@@ -101,12 +108,18 @@ class _TeacherLoginScreenState extends State<TeacherLoginScreen> {
                     ),
                   ],
                 ),
+                ),
+                ),
               ),
             ),
 
             // --- FORMULARIO ---
-            Padding(
-              padding: const EdgeInsets.all(30),
+            ResponsiveContainer(
+              maxWidth: Breakpoints.form,
+              padding: EdgeInsets.symmetric(
+                horizontal: context.responsive(24.0, tablet: 30.0),
+                vertical: 30,
+              ),
               child: Column(
                 children: [
                   const SizedBox(height: 10),
@@ -115,6 +128,8 @@ class _TeacherLoginScreenState extends State<TeacherLoginScreen> {
                   TextField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    autofillHints: const [AutofillHints.username],
                     decoration: InputDecoration(
                       labelText: "Correo Institucional",
                       prefixIcon: Icon(Icons.email_outlined, color: Colors.blue.shade900),
@@ -130,6 +145,11 @@ class _TeacherLoginScreenState extends State<TeacherLoginScreen> {
                   TextField(
                     controller: _passwordController,
                     obscureText: _obscurePassword, // Controlado por variable
+                    textInputAction: TextInputAction.done,
+                    autofillHints: const [AutofillHints.password],
+                    onSubmitted: (_) {
+                      if (!_isLoading) _login();
+                    },
                     decoration: InputDecoration(
                       labelText: "Contraseña",
                       prefixIcon: Icon(Icons.lock_outline, color: Colors.blue.shade900),
@@ -174,8 +194,9 @@ class _TeacherLoginScreenState extends State<TeacherLoginScreen> {
                   const SizedBox(height: 30),
                   
                   // Registro
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text("¿Eres nuevo docente? ", style: TextStyle(color: Colors.grey[600])),
                       GestureDetector(

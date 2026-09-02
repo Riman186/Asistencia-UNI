@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/subject_model.dart';
 import 'teacher_login_screen.dart'; // Importamos el Login para ir allí al finalizar
 
+import '../utils/responsive.dart';
+
 class TeacherStep2Screen extends StatefulWidget {
   final String name;
   final String employeeId;
@@ -78,7 +80,8 @@ class _TeacherStep2ScreenState extends State<TeacherStep2Screen> {
                   const Text("Asignar Clase", style: TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
-              content: Column(
+              content: SingleChildScrollView(
+                child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   // DROPDOWN 1: NOMBRE DEL CURSO
@@ -119,6 +122,7 @@ class _TeacherStep2ScreenState extends State<TeacherStep2Screen> {
                       },
                     ),
                 ],
+                ),
               ),
               actions: [
                 // Opción de Borrar (Si ya había algo asignado)
@@ -230,7 +234,7 @@ class _TeacherStep2ScreenState extends State<TeacherStep2Screen> {
         children: [
           // --- HEADER ---
           Container(
-            height: 160,
+            height: (context.screenHeight * 0.20).clamp(130.0, 180.0),
             width: double.infinity,
             decoration: BoxDecoration(
               color: Colors.blue.shade900,
@@ -252,13 +256,26 @@ class _TeacherStep2ScreenState extends State<TeacherStep2Screen> {
 
           // --- GRID DE HORARIO ---
           Expanded(
-            child: SingleChildScrollView( // Scroll Vertical
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Las columnas se estiran para llenar el ancho disponible, pero
+                // nunca bajan de 90px: por debajo de eso la tabla se desplaza
+                // horizontalmente en lugar de comprimirse.
+                const double hourColumnWidth = 60;
+                const double tablePadding = 32;
+                final double available =
+                    constraints.maxWidth - tablePadding - hourColumnWidth;
+                final double dayColumnWidth =
+                    (available / _days.length).clamp(90.0, 160.0);
+
+                return SingleChildScrollView( // Scroll Vertical
               child: SingleChildScrollView( // Scroll Horizontal
                 scrollDirection: Axis.horizontal,
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Table(
-                    defaultColumnWidth: const FixedColumnWidth(100), // Ancho de cada columna de día
+                    defaultColumnWidth: FixedColumnWidth(dayColumnWidth),
+                    columnWidths: const {0: FixedColumnWidth(hourColumnWidth)},
                     border: TableBorder.all(color: Colors.grey.shade300),
                     children: [
                       // FILA DE ENCABEZADO (DÍAS)
@@ -322,6 +339,8 @@ class _TeacherStep2ScreenState extends State<TeacherStep2Screen> {
                   ),
                 ),
               ),
+                );
+              },
             ),
           ),
         ],
@@ -329,12 +348,15 @@ class _TeacherStep2ScreenState extends State<TeacherStep2Screen> {
 
       // --- BOTÓN FLOTANTE FINALIZAR ---
       bottomNavigationBar: Container(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.all(context.gutter),
         decoration: const BoxDecoration(
           color: Colors.white, 
           boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -5))]
         ),
-        child: SizedBox(
+        child: ResponsiveContainer(
+          maxWidth: Breakpoints.form,
+          shrinkVertically: true,
+          child: SizedBox(
           height: 55,
           child: ElevatedButton(
             onPressed: _isLoading ? null : _finishRegister,
@@ -346,8 +368,12 @@ class _TeacherStep2ScreenState extends State<TeacherStep2Screen> {
             ),
             child: _isLoading 
               ? const CircularProgressIndicator(color: Colors.white)
-              : const Text("FINALIZAR Y GUARDAR HORARIO", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              : const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text("FINALIZAR Y GUARDAR HORARIO", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                ),
           ),
+        ),
         ),
       ),
     );

@@ -7,6 +7,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
+import '../utils/responsive.dart';
 import 'attendance_student_list_screen.dart';
 import 'teacher_history_screen.dart';
 import 'teacher_profile_screen.dart';
@@ -137,12 +138,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 Expanded(
                   child: schedule.isEmpty
                       ? _buildEmptyState("No hay horario configurado", Icons.calendar_today_outlined)
-                      : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
-                          itemCount: schedule.length,
-                          itemBuilder: (context, index) {
-                            return _buildModernClassCard(schedule[index], todaysSessionsMap);
-                          },
+                      : ResponsiveContainer(
+                          child: ListView.builder(
+                            padding: EdgeInsets.fromLTRB(
+                                context.gutter, 10, context.gutter, 20),
+                            itemCount: schedule.length,
+                            itemBuilder: (context, index) {
+                              return _buildModernClassCard(schedule[index], todaysSessionsMap);
+                            },
+                          ),
                         ),
                 ),
               ],
@@ -160,7 +164,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      padding: EdgeInsets.symmetric(horizontal: context.gutter, vertical: 20),
       width: double.infinity,
       decoration: BoxDecoration(
         color: _cardColor,
@@ -169,12 +173,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 5))
         ],
       ),
-      child: Column(
+      child: ResponsiveContainer(
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(subtitle, style: TextStyle(color: Colors.grey[600], fontSize: 14)),
           const SizedBox(height: 4),
-          Text(title, style: TextStyle(color: _primaryColor, fontSize: 26, fontWeight: FontWeight.w800)),
+          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: _primaryColor, fontSize: context.responsive(22.0, tablet: 26.0), fontWeight: FontWeight.w800)),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -184,11 +189,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               children: [
                 Icon(Icons.today, size: 16, color: _primaryColor),
                 const SizedBox(width: 6),
-                Text(dateText, style: TextStyle(color: _primaryColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                Flexible(child: Text(dateText, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: _primaryColor, fontWeight: FontWeight.bold, fontSize: 12))),
               ],
             ),
           )
         ],
+      ),
       ),
     );
   }
@@ -264,6 +270,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
             children: [
               // Hora
               Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(clase['hora_inicio'].toString().split(' ')[0], 
                     style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
@@ -271,7 +278,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     style: TextStyle(fontSize: 12, color: Colors.grey[500], fontWeight: FontWeight.bold)),
                 ],
               ),
-              Container(height: 40, width: 1, color: Colors.grey[200], margin: const EdgeInsets.symmetric(horizontal: 15)),
+              Container(height: 40, width: 1, color: Colors.grey[200], margin: EdgeInsets.symmetric(horizontal: context.isMobile ? 10 : 15)),
               
               // Info
               Expanded(
@@ -284,16 +291,16 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                         color: statusColor.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text(statusText.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor)),
+                      child: Text(statusText.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor)),
                     ),
                     const SizedBox(height: 6),
-                    Text(clase['curso'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(clase['curso'], maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                     const SizedBox(height: 4),
                     Row(
                       children: [
                         Icon(Icons.meeting_room_outlined, size: 14, color: Colors.grey[600]),
                         const SizedBox(width: 4),
-                        Text("Aula ${clase['aula']}", style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+                        Flexible(child: Text("Aula ${clase['aula']}", maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey[600], fontSize: 13))),
                       ],
                     ),
                   ],
@@ -346,13 +353,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               final docs = snapshot.data!.docs;
               if (docs.isEmpty) return _buildEmptyState("No hay registros recientes.", Icons.qr_code_scanner);
 
-              return ListView.builder(
-                padding: const EdgeInsets.all(20),
-                itemCount: docs.length,
-                itemBuilder: (context, index) {
-                  final session = docs[index].data() as Map<String, dynamic>;
-                  return _buildSessionCard(session, context);
-                },
+              return ResponsiveContainer(
+                child: ListView.builder(
+                  padding: EdgeInsets.all(context.gutter),
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    final session = docs[index].data() as Map<String, dynamic>;
+                    return _buildSessionCard(session, context);
+                  },
+                ),
               );
             },
           ),
@@ -377,18 +386,30 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
           child: Icon(Icons.class_outlined, color: _primaryColor),
         ),
-        title: Text(session['curso'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        title: Text(session['curso'], maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 6),
-          child: Row(
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Icon(Icons.calendar_today, size: 12, color: Colors.grey[600]),
-              const SizedBox(width: 4),
-              Text(session['fecha'], style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-              const SizedBox(width: 12),
-              Icon(Icons.access_time, size: 12, color: Colors.grey[600]),
-              const SizedBox(width: 4),
-              Text(session['hora_inicio'], style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.calendar_today, size: 12, color: Colors.grey[600]),
+                  const SizedBox(width: 4),
+                  Text(session['fecha'], style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                ],
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.access_time, size: 12, color: Colors.grey[600]),
+                  const SizedBox(width: 4),
+                  Text(session['hora_inicio'], style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                ],
+              ),
             ],
           ),
         ),
@@ -410,7 +431,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         children: [
           Icon(icon, size: 60, color: Colors.grey[300]),
           const SizedBox(height: 15),
-          Text(text, style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(text, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+          ),
         ],
       ),
     );
@@ -557,20 +581,28 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
     int m = _seconds ~/ 60;
     int s = _seconds % 60;
     
+    // El diálogo se adapta al espacio disponible: nunca más ancho que la
+    // ventana y con scroll interno si la pantalla es muy baja.
+    final double dialogWidth =
+        (context.screenWidth - 80).clamp(240.0, 340.0);
+    final double qrSize = (dialogWidth - 100).clamp(150.0, 220.0);
+
     return AlertDialog(
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-      contentPadding: const EdgeInsets.all(25),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      contentPadding: EdgeInsets.all(context.isShort ? 16 : 25),
       content: SizedBox(
-        width: 300,
+        width: dialogWidth,
+        child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text("Escanea Ahora", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                const Flexible(child: Text("Escanea Ahora", maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18))),
                 IconButton(
                   icon: const Icon(Icons.close), 
                   onPressed: _finish, // Al dar X, cierra sesión en BD
@@ -588,11 +620,11 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
                 textAlign: TextAlign.center,
               ),
             ),
-            const SizedBox(height: 25),
+            SizedBox(height: context.isShort ? 12 : 25),
             
             Container(
-              width: 220,
-              height: 220,
+              width: qrSize + 20,
+              height: qrSize + 20,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -604,7 +636,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
                 child: QrImageView(
                   data: _qrData,
                   version: QrVersions.auto,
-                  size: 200.0,
+                  size: qrSize,
                   backgroundColor: Colors.white,
                   foregroundColor: const Color(0xFF0D47A1),
                   padding: const EdgeInsets.all(0),
@@ -615,7 +647,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
               ),
             ),
 
-            const SizedBox(height: 25),
+            SizedBox(height: context.isShort ? 12 : 25),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -642,6 +674,7 @@ class _QRTimerDialogState extends State<QRTimerDialog> {
               ),
             )
           ],
+        ),
         ),
       ),
     );

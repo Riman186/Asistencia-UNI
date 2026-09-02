@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../utils/responsive.dart';
 // Para colores aleatorios
 
 class StudentHistoryScreen extends StatefulWidget {
@@ -70,7 +72,10 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                       children: [
                         Icon(Icons.history_edu, size: 80, color: Colors.grey.shade300),
                         const SizedBox(height: 20),
-                        Text("Aún no tienes asistencias registradas.", style: TextStyle(color: Colors.grey.shade600, fontSize: 16)),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Text("Aún no tienes asistencias registradas.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade600, fontSize: 16)),
+                        ),
                       ],
                     ),
                   );
@@ -91,8 +96,9 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                   return tB.compareTo(tA);
                 });
 
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                return ResponsiveContainer(
+                  child: ListView.builder(
+                  padding: EdgeInsets.symmetric(horizontal: context.gutter, vertical: 20),
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
                     final data = docs[index].data() as Map<String, dynamic>;
@@ -209,6 +215,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                       ),
                     );
                   },
+                  ),
                 );
               },
             ),

@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'student_home_screen.dart'; // Asegúrate de tener este import
 
+import '../utils/responsive.dart';
+
 class StudentRegisterScreen extends StatefulWidget {
   const StudentRegisterScreen({super.key});
 
@@ -113,7 +115,7 @@ class _StudentRegisterScreenState extends State<StudentRegisterScreen> {
           children: [
             // --- CABECERA ---
             Container(
-              height: 180,
+              height: (context.screenHeight * 0.22).clamp(140.0, 200.0),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [Colors.blue.shade900, Colors.blue.shade600],
@@ -145,8 +147,9 @@ class _StudentRegisterScreenState extends State<StudentRegisterScreen> {
             ),
 
             // --- FORMULARIO ---
-            Padding(
-              padding: const EdgeInsets.all(24),
+            ResponsiveContainer(
+              maxWidth: Breakpoints.form,
+              padding: EdgeInsets.all(context.responsive(20.0, tablet: 24.0)),
               child: Form(
                 key: _formKey,
                 child: Column(

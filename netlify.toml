@@ -1,0 +1,29 @@
+# Configuración de despliegue en Netlify para la app Flutter Web.
+
+[build]
+  command = "bash scripts/build_web.sh"
+  publish = "build/web"
+
+[build.environment]
+  # Debe traer Dart >= 3.10 (lo que exige pubspec.yaml).
+  FLUTTER_VERSION = "3.47.2"
+
+# La app es una SPA: cualquier ruta que no corresponda a un archivo real se
+# resuelve con index.html para que Flutter maneje la navegación. Netlify sirve
+# primero los archivos existentes, así que los assets no pasan por esta regla.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# El index y el service worker no deben cachearse: si el navegador se queda con
+# una copia vieja, el usuario sigue viendo el build anterior tras cada deploy.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/flutter_service_worker.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
