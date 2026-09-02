@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
+import '../utils/responsive.dart';
 import 'student_register_screen.dart';
 import 'student_home_screen.dart'; 
 
@@ -68,7 +70,8 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
           children: [
             // --- CABECERA ESTUDIANTES ---
             Container(
-              height: 280,
+              width: double.infinity,
+              height: (context.screenHeight * 0.32).clamp(200.0, 300.0),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [Colors.blue.shade800, Colors.blue.shade500],
@@ -77,8 +80,12 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                 ),
                 borderRadius: const BorderRadius.only(bottomRight: Radius.circular(50)),
               ),
-              child: Center(
+              child: SafeArea(
+                bottom: false,
+                child: Center(
+                child: SingleChildScrollView(
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Container(
@@ -87,7 +94,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                         color: Colors.white.withOpacity(0.15),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.person_outline, size: 80, color: Colors.white),
+                      child: Icon(Icons.person_outline, size: context.isShort ? 52 : 80, color: Colors.white),
                     ),
                     const SizedBox(height: 20),
                     const Text(
@@ -105,12 +112,18 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                     ),
                   ],
                 ),
+                ),
+                ),
               ),
             ),
 
             // --- FORMULARIO ---
-            Padding(
-              padding: const EdgeInsets.all(30),
+            ResponsiveContainer(
+              maxWidth: Breakpoints.form,
+              padding: EdgeInsets.symmetric(
+                horizontal: context.responsive(24.0, tablet: 30.0),
+                vertical: 30,
+              ),
               child: Column(
                 children: [
                   const SizedBox(height: 10),
@@ -118,6 +131,8 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                   TextField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    autofillHints: const [AutofillHints.username],
                     decoration: InputDecoration(
                       labelText: "Correo Institucional",
                       prefixIcon: Icon(Icons.alternate_email, color: Colors.blue.shade700),
@@ -132,6 +147,11 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                   TextField(
                     controller: _passwordController,
                     obscureText: _obscurePassword, // Toggle
+                    textInputAction: TextInputAction.done,
+                    autofillHints: const [AutofillHints.password],
+                    onSubmitted: (_) {
+                      if (!_isLoading) _login();
+                    },
                     decoration: InputDecoration(
                       labelText: "Contraseña",
                       prefixIcon: Icon(Icons.lock_open, color: Colors.blue.shade700),
@@ -174,8 +194,9 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                   
                   const SizedBox(height: 30),
                   
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text("¿No tienes cuenta? ", style: TextStyle(color: Colors.grey[600])),
                       GestureDetector(

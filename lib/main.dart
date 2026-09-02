@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -25,10 +26,25 @@ class AsistenciaApp extends StatelessWidget {
     return MaterialApp(
       title: 'Asistencia UNI',
       debugShowCheckedModeBanner: false,
+      scrollBehavior: const AppScrollBehavior(),
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
+      // Se limita el escalado de texto del sistema/navegador para que las
+      // tarjetas no se rompan con tamaños de fuente muy grandes.
+      builder: (context, child) {
+        final MediaQueryData mq = MediaQuery.of(context);
+        return MediaQuery(
+          data: mq.copyWith(
+            textScaler: mq.textScaler.clamp(
+              minScaleFactor: 0.85,
+              maxScaleFactor: 1.3,
+            ),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       // Usamos un Wrapper para decidir qué pantalla mostrar
       home: const AuthWrapper(),
     );
@@ -106,4 +122,22 @@ class RoleCheckScreen extends StatelessWidget {
       },
     );
   }
+}
+
+/// Permite arrastrar las listas con el mouse y el trackpad.
+///
+/// Por defecto Flutter sólo acepta gestos táctiles y de stylus, de modo que en
+/// un navegador de escritorio los carruseles y listas horizontales no se pueden
+/// desplazar con el mouse.
+class AppScrollBehavior extends MaterialScrollBehavior {
+  const AppScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => <PointerDeviceKind>{
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+        PointerDeviceKind.invertedStylus,
+      };
 }

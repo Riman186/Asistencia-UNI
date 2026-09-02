@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:intl/intl.dart';
+import '../utils/responsive.dart';
 import 'student_risk_screen.dart';
 import 'student_history_screen.dart';
 
@@ -180,7 +181,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      body: screens[_selectedIndex],
+      body: SafeArea(bottom: false, child: screens[_selectedIndex]),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         selectedItemColor: Colors.blue.shade900,
@@ -204,25 +205,35 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       children: [
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(20, 60, 20, 30),
+          padding: EdgeInsets.fromLTRB(
+            context.gutter,
+            // El espacio superior lo aporta el SafeArea del Scaffold, así que
+            // aquí sólo queda el margen visual.
+            context.isShort ? 16 : 24,
+            context.gutter,
+            30,
+          ),
           decoration: BoxDecoration(
             color: Colors.blue.shade900,
             borderRadius: const BorderRadius.vertical(bottom: Radius.circular(30)),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("Bienvenido,", style: TextStyle(color: Colors.white70, fontSize: 16)),
-              Text(_studentName, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 5),
-              Text("Carnet: $_studentCode", style: const TextStyle(color: Colors.white)),
-            ],
+          child: ResponsiveContainer(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Bienvenido,", style: TextStyle(color: Colors.white70, fontSize: 16)),
+                Text(_studentName, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 5),
+                Text("Carnet: $_studentCode", maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white)),
+              ],
+            ),
           ),
         ),
         
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
+          child: ResponsiveContainer(
+            maxWidth: Breakpoints.form,
+            padding: EdgeInsets.all(context.gutter),
             child: _scanSuccess 
               ? _buildSuccessView() 
               : _isScanning 
@@ -236,12 +247,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   Widget _buildIdleView() {
     return Center(
+      child: SingleChildScrollView(
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.qr_code_2, size: 100, color: Colors.blue.shade200),
+          Icon(Icons.qr_code_2, size: context.isShort ? 64 : 100, color: Colors.blue.shade200),
           const SizedBox(height: 20),
-          const Text("Listo para registrar asistencia", style: TextStyle(fontSize: 16, color: Colors.grey)),
+          const Text("Listo para registrar asistencia", textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey)),
           const SizedBox(height: 30),
           ElevatedButton.icon(
             icon: const Icon(Icons.camera_alt),
@@ -259,6 +272,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           )
         ],
       ),
+      ),
     );
   }
 
@@ -275,12 +289,19 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   controller: _cameraController,
                   onDetect: _onDetect,
                 ),
-                Container(
-                  width: 250, height: 250,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.white, width: 2),
-                    borderRadius: BorderRadius.circular(10)
-                  ),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final double box = (constraints.biggest.shortestSide * 0.7)
+                        .clamp(140.0, 250.0);
+                    return Container(
+                      width: box,
+                      height: box,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.white, width: 2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    );
+                  },
                 ),
                 if (_isProcessing)
                   Container(
@@ -311,14 +332,16 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     Color color = _scanMessage.contains("finalizada") ? Colors.red : Colors.green;
     IconData icon = _scanMessage.contains("finalizada") ? Icons.cancel : Icons.check_circle;
 
-    return Container(
+    return SingleChildScrollView(
+      child: Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(30),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10)]),
+      padding: EdgeInsets.all(context.isShort ? 20 : 30),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10)]),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 80),
+          Icon(icon, color: color, size: context.isShort ? 56 : 80),
           const SizedBox(height: 20),
           Text(_scanMessage, textAlign: TextAlign.center, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: color)),
           const SizedBox(height: 20),
@@ -336,6 +359,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           )
         ],
       ),
+      ),
     );
   }
 
@@ -346,7 +370,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(color: Colors.grey)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(width: 12),
+          Flexible(child: Text(value, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold))),
         ],
       ),
     );

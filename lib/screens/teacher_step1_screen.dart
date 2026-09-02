@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/subject_model.dart';
 import 'teacher_step2_screen.dart';
 
+import '../utils/responsive.dart';
+
 class TeacherStep1Screen extends StatefulWidget {
   const TeacherStep1Screen({super.key});
 
@@ -87,7 +89,7 @@ class _TeacherStep1ScreenState extends State<TeacherStep1Screen> {
           children: [
             // HEADER
             Container(
-              height: 180,
+              height: (context.screenHeight * 0.22).clamp(140.0, 200.0),
               decoration: BoxDecoration(
                 color: Colors.blue.shade900,
                 borderRadius: const BorderRadius.only(bottomRight: Radius.circular(60)),
@@ -105,8 +107,9 @@ class _TeacherStep1ScreenState extends State<TeacherStep1Screen> {
               ),
             ),
             
-            Padding(
-              padding: const EdgeInsets.all(20),
+            ResponsiveContainer(
+              maxWidth: Breakpoints.form,
+              padding: EdgeInsets.all(context.responsive(20.0, tablet: 24.0)),
               child: Form(
                 key: _formKey,
                 child: Column(

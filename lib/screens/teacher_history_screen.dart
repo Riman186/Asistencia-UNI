@@ -1,12 +1,11 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:file_picker/file_picker.dart'; // <--- IMPORTANTE
+
+import '../services/report_downloader.dart';
+import '../utils/responsive.dart';
 
 class TeacherHistoryScreen extends StatefulWidget {
   const TeacherHistoryScreen({super.key});
@@ -316,51 +315,32 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
         ),
       );
 
-      // --- LÓGICA MULTIPLATAFORMA PARA GUARDAR/DESCARGAR ---
+      // --- ENTREGA DEL ARCHIVO (WEB, MÓVIL Y ESCRITORIO) ---
+      // En web esto dispara una descarga real del navegador; en móvil abre la
+      // hoja de compartir y en escritorio el diálogo "Guardar como...".
       final bytes = await pdf.save();
-      final String fileName = "Asistencia_${session['curso']}_${session['fecha']}.pdf";
+      final String fileName =
+          "Asistencia_${session['curso']}_${session['fecha']}.pdf";
 
-      if (Platform.isAndroid || Platform.isIOS) {
-        // === MÓVIL: USAR SHARE (WhatsApp, Email, Archivos) ===
-        await Printing.sharePdf(
-          bytes: bytes,
-          filename: fileName,
-        );
-      } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-        // === ESCRITORIO: USAR "GUARDAR COMO..." ===
-        String? outputFile = await FilePicker.platform.saveFile(
-          dialogTitle: 'Guardar Reporte de Asistencia',
-          fileName: fileName,
-          type: FileType.custom,
-          allowedExtensions: ['pdf'],
-        );
+      final result = await downloadReport(bytes: bytes, fileName: fileName);
 
-        if (outputFile != null) {
-          // El usuario eligió una ruta
-          final file = File(outputFile);
-          await file.writeAsBytes(bytes);
-          
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text("Guardado en: $outputFile"), 
-                backgroundColor: Colors.green,
-                action: SnackBarAction(
-                  label: "OK", 
-                  textColor: Colors.white,
-                  onPressed: () {},
-                ),
-              )
-            );
-          }
-        } else {
-          // El usuario canceló
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Descarga cancelada"), backgroundColor: Colors.orange)
-            );
-          }
-        }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+      if (result.isCancelled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Descarga cancelada"),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      } else if (result.message != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.message!),
+            backgroundColor: Colors.green,
+          ),
+        );
       }
 
     } catch (e) {
@@ -442,19 +422,22 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final double gutter = context.gutter;
+
     return Scaffold(
       backgroundColor: _backgroundColor,
       body: Column(
         children: [
           Container(
-            padding: const EdgeInsets.fromLTRB(24, 60, 24, 25),
+            padding: EdgeInsets.fromLTRB(gutter, context.isShort ? 16 : 28, gutter, 25),
             width: double.infinity,
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30)),
               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 5))],
             ),
-            child: Column(
+            child: ResponsiveContainer(
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text("Historial Académico", style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Colors.black87)),
@@ -502,16 +485,19 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                 )
               ],
             ),
+            ),
           ),
           Expanded(
             child: _isLoading 
               ? const Center(child: CircularProgressIndicator())
               : _filteredSessions.isEmpty
                 ? _buildEmptyState()
-                : ListView.builder(
-                    padding: const EdgeInsets.all(20),
-                    itemCount: _filteredSessions.length,
-                    itemBuilder: (context, index) => _buildHistoryCard(_filteredSessions[index]),
+                : ResponsiveContainer(
+                    child: ListView.builder(
+                      padding: EdgeInsets.fromLTRB(gutter, 20, gutter, 20),
+                      itemCount: _filteredSessions.length,
+                      itemBuilder: (context, index) => _buildHistoryCard(_filteredSessions[index]),
+                    ),
                   ),
           ),
         ],
@@ -557,24 +543,24 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(session['curso'], style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                    Text(session['curso'], maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
                     const SizedBox(height: 4),
-                    Text("Grupo ${session['seccion']} • Aula ${session['aula']}", style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                    Text("Grupo ${session['seccion']} • Aula ${session['aula']}", maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                     const SizedBox(height: 8),
                     
                     isEmptySession 
                     ? Text("Sin asistencia registrada", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.red[300]))
-                    : Row(
+                    // Wrap en vez de Row: en pantallas muy angostas los
+                    // contadores bajan de línea en lugar de desbordarse.
+                    : Wrap(
+                      spacing: 12,
+                      runSpacing: 6,
                       children: [
                         _buildMiniStat(Icons.groups, "${session['total']}", Colors.grey[700]!),
-                        const SizedBox(width: 12),
                         _buildMiniStat(Icons.male, "${session['varones']}", Colors.blue[700]!),
-                        const SizedBox(width: 8),
                         _buildMiniStat(Icons.female, "${session['mujeres']}", Colors.pink[400]!),
-                        if (session['justificados'] > 0) ...[
-                          const SizedBox(width: 8),
+                        if (session['justificados'] > 0)
                           _buildMiniStat(Icons.assignment_late, "${session['justificados']}", Colors.orange[700]!),
-                        ]
                       ],
                     )
                   ],
@@ -601,6 +587,7 @@ class _TeacherHistoryScreenState extends State<TeacherHistoryScreen> {
 
   Widget _buildMiniStat(IconData icon, String text, Color color) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 14, color: color),
         const SizedBox(width: 2),

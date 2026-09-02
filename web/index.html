@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
   <!--
     If you are serving your web app in a path other than the root, change the
@@ -18,21 +18,88 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="Sistema de control de asistencia universitaria: registro de sesiones, control de alumnos y descarga de reportes en PDF.">
+
+  <!--
+    Imprescindible para que la app se adapte a la pantalla de cada dispositivo.
+    Sin esta etiqueta los navegadores móviles asumen un viewport de ~980px y
+    muestran la página como una versión de escritorio reducida.
+    `viewport-fit=cover` permite usar toda la pantalla en móviles con notch.
+  -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0D47A1">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="asistencia_uni">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Asistencia UNI">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>asistencia_uni</title>
+  <title>Asistencia UNI</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    /*
+      La app ocupa siempre el alto real de la ventana y no rebota al hacer
+      scroll en móviles; Flutter gestiona su propio desplazamiento interno.
+    */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background-color: #F4F6F9;
+      overscroll-behavior: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Indicador mientras se descarga el bundle de la aplicación. */
+    #loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: fixed;
+      inset: 0;
+      background-color: #F4F6F9;
+      transition: opacity 250ms ease-out;
+    }
+
+    #loading.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    #loading .spinner {
+      width: 42px;
+      height: 42px;
+      border: 4px solid rgba(13, 71, 161, 0.15);
+      border-top-color: #0D47A1;
+      border-radius: 50%;
+      animation: spin 900ms linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
 </head>
 <body>
+  <div id="loading"><div class="spinner"></div></div>
+
+  <script>
+    // Flutter avisa cuando el primer frame ya se pintó; recién ahí se oculta
+    // el indicador de carga.
+    window.addEventListener('flutter-first-frame', function () {
+      var loading = document.getElementById('loading');
+      if (!loading) return;
+      loading.classList.add('hidden');
+      setTimeout(function () { loading.remove(); }, 300);
+    });
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

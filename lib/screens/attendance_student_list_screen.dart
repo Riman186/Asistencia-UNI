@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../utils/responsive.dart';
+
 class AttendanceStudentListScreen extends StatefulWidget {
   final Map<String, dynamic> clase;
 
@@ -40,21 +42,25 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Registro Manual"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text("Ingresa el carnet del estudiante:"),
-            const SizedBox(height: 10),
-            TextField(
-              controller: carnetController,
-              decoration: const InputDecoration(
-                labelText: "N° Carnet",
-                hintText: "Ej: 2020-0001i",
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.badge),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Ingresa el carnet del estudiante:"),
+              const SizedBox(height: 10),
+              TextField(
+                controller: carnetController,
+                autofocus: true,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(
+                  labelText: "N° Carnet",
+                  hintText: "Ej: 2020-0001i",
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.badge),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
@@ -163,13 +169,15 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
     final data = doc.data() as Map<String, dynamic>;
     showModalBottomSheet(
       context: context,
-      builder: (context) => Wrap(
+      builder: (context) => SafeArea(
+        child: Wrap(
         children: [
           ListTile(leading: const Icon(Icons.check, color: Colors.green), title: const Text("Presente"), onTap: () { _updateStatus(doc.id, "Presente"); Navigator.pop(context); }),
           ListTile(leading: const Icon(Icons.access_time, color: Colors.amber), title: const Text("Tardanza"), onTap: () { _updateStatus(doc.id, "Tardanza"); Navigator.pop(context); }),
           ListTile(leading: const Icon(Icons.close, color: Colors.red), title: const Text("Ausente"), onTap: () { _updateStatus(doc.id, "Ausente"); Navigator.pop(context); }),
           ListTile(leading: const Icon(Icons.edit_note, color: Colors.blue), title: const Text("Justificar"), onTap: () { Navigator.pop(context); _showJustifyDialog(doc.id, data['alumnoNombre']); }),
         ],
+        ),
       ),
     );
   }
@@ -182,8 +190,8 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.clase['curso'], style: const TextStyle(fontSize: 16)),
-            Text("Grupo ${widget.clase['seccion']}", style: const TextStyle(fontSize: 12)),
+            Text(widget.clase['curso'], maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16)),
+            Text("Grupo ${widget.clase['seccion']}", maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
           ],
         ),
         backgroundColor: Colors.blue.shade900,
@@ -221,19 +229,22 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
               Container(
                 padding: const EdgeInsets.all(16),
                 color: Colors.blue.shade900,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _stat("Total", "${docs.length}", Colors.white),
-                    _stat("Presentes", "${docs.where((d) => d['estado'] == 'Presente').length}", Colors.greenAccent),
-                    _stat("Faltas", "${docs.where((d) => d['estado'] == 'Ausente').length}", Colors.redAccent),
-                  ],
+                width: double.infinity,
+                child: ResponsiveContainer(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _stat("Total", "${docs.length}", Colors.white),
+                      _stat("Presentes", "${docs.where((d) => d['estado'] == 'Presente').length}", Colors.greenAccent),
+                      _stat("Faltas", "${docs.where((d) => d['estado'] == 'Ausente').length}", Colors.redAccent),
+                    ],
+                  ),
                 ),
               ),
               
               // Buscador
-              Padding(
-                padding: const EdgeInsets.all(10),
+              ResponsiveContainer(
+                padding: EdgeInsets.symmetric(horizontal: context.gutter, vertical: 10),
                 child: TextField(
                   onChanged: (v) => setState(() => _searchQuery = v),
                   decoration: InputDecoration(
@@ -251,10 +262,14 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
               Expanded(
                 child: filteredDocs.isEmpty
                   ? const Center(child: Text("No hay alumnos registrados hoy."))
-                  : ListView.builder(
-                      padding: const EdgeInsets.only(bottom: 80),
-                      itemCount: filteredDocs.length,
-                      itemBuilder: (context, index) => _buildCard(filteredDocs[index]),
+                  : ResponsiveContainer(
+                      child: ListView.builder(
+                        // El espacio inferior evita que el botón flotante
+                        // tape la última tarjeta.
+                        padding: const EdgeInsets.only(bottom: 90),
+                        itemCount: filteredDocs.length,
+                        itemBuilder: (context, index) => _buildCard(filteredDocs[index]),
+                      ),
                     ),
               ),
             ],
@@ -266,6 +281,7 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
 
   Widget _stat(String label, String value, Color color) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(value, style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.bold)),
         Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
@@ -288,8 +304,8 @@ class _AttendanceStudentListScreenState extends State<AttendanceStudentListScree
           backgroundColor: color.withOpacity(0.1),
           child: Icon(Icons.person, color: color),
         ),
-        title: Text(data['alumnoNombre'] ?? "Sin Nombre", style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text("${data['alumnoCarnet'] ?? ''} • ${data['hora_registro'] ?? ''}"),
+        title: Text(data['alumnoNombre'] ?? "Sin Nombre", maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text("${data['alumnoCarnet'] ?? ''} • ${data['hora_registro'] ?? ''}", maxLines: 1, overflow: TextOverflow.ellipsis),
         trailing: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
